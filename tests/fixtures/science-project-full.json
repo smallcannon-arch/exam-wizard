@@ -1,0 +1,170 @@
+{
+  "project": {
+    "subject": "自然",
+    "grade": 5,
+    "totalScore": 100
+  },
+  "allocations": [
+    {
+      "id": "U1",
+      "name": "探索星空的奧祕",
+      "periodCount": 15,
+      "suggestedScore": 100
+    }
+  ],
+  "objectives": [
+    {
+      "objectiveId": "1-1-1",
+      "unitName": "探索星空的奧祕",
+      "lessonName": "星空觀察入門",
+      "text": "能說明夜間觀察星空前需要準備的安全與紀錄事項。",
+      "periodCount": 2
+    },
+    {
+      "objectiveId": "1-1-2",
+      "unitName": "探索星空的奧祕",
+      "lessonName": "星空觀察入門",
+      "text": "能以方向與仰角描述夜空中亮點的大略位置。",
+      "periodCount": 2
+    },
+    {
+      "objectiveId": "1-2-1",
+      "unitName": "探索星空的奧祕",
+      "lessonName": "星座與季節",
+      "text": "能比較不同日期或時段所見星空位置的變化。",
+      "periodCount": 3
+    },
+    {
+      "objectiveId": "1-2-2",
+      "unitName": "探索星空的奧祕",
+      "lessonName": "星座與季節",
+      "text": "能依觀察紀錄推論星星在夜空中看似移動的方向。",
+      "periodCount": 3
+    },
+    {
+      "objectiveId": "1-3-1",
+      "unitName": "探索星空的奧祕",
+      "lessonName": "觀測工具與紀錄",
+      "text": "能選擇合適的工具協助辨認星空方位與星座位置。",
+      "periodCount": 2
+    },
+    {
+      "objectiveId": "1-3-2",
+      "unitName": "探索星空的奧祕",
+      "lessonName": "觀測工具與紀錄",
+      "text": "能整理星空觀測資料並提出合理的觀察結論。",
+      "periodCount": 2
+    },
+    {
+      "objectiveId": "1-3-3",
+      "unitName": "探索星空的奧祕",
+      "lessonName": "觀測工具與紀錄",
+      "text": "能檢核觀測紀錄是否包含日期、時間、地點與天氣等資訊。",
+      "periodCount": 1
+    }
+  ],
+  "items": [
+    {
+      "itemId": "A-01",
+      "groupId": "",
+      "questionType": "選擇題",
+      "competencyType": "概念理解",
+      "stimulus": "",
+      "question": "班級準備到操場進行夜間星空觀察，下列哪一項紀錄最有助於日後比較觀測結果？",
+      "options": ["日期與時間", "書包重量", "午餐菜色", "鉛筆品牌"],
+      "answer": "1",
+      "explanation": "日期與時間能協助比較不同觀測條件。",
+      "objectiveIds": ["1-1-1"],
+      "score": 20,
+      "estimatedTimeSeconds": 480,
+      "discriminationPrediction": 0.34,
+      "chineseDimension": null,
+      "reviewFlags": []
+    },
+    {
+      "itemId": "A-02",
+      "groupId": "",
+      "questionType": "選擇題",
+      "competencyType": "資料判讀",
+      "stimulus": "小安記錄某顆亮星位於東方天空，仰角約 35 度。",
+      "question": "這份紀錄主要使用了哪兩種資訊描述星星位置？",
+      "options": ["方向與仰角", "顏色與大小", "溫度與風向", "地名與路線"],
+      "answer": "1",
+      "explanation": "方向與仰角可描述天空中物體的大略位置。",
+      "objectiveIds": ["1-1-2"],
+      "score": 15,
+      "estimatedTimeSeconds": 480,
+      "discriminationPrediction": 0.38,
+      "chineseDimension": null,
+      "reviewFlags": []
+    },
+    {
+      "itemId": "B-01",
+      "groupId": "G-01",
+      "questionType": "題組小題",
+      "competencyType": "資料判讀",
+      "stimulus": "某組學生連續三晚在同一地點記錄同一片星空。",
+      "question": "若要比較星空在不同日期的差異，最需要先確認哪一項條件？",
+      "options": ["觀測時間是否接近", "水壺容量是否相同", "座位號碼是否相同", "課本頁數是否相同"],
+      "answer": "1",
+      "explanation": "接近的觀測時間能降低比較誤差。",
+      "objectiveIds": ["1-2-1"],
+      "score": 15,
+      "estimatedTimeSeconds": 480,
+      "discriminationPrediction": 0.41,
+      "chineseDimension": null,
+      "reviewFlags": []
+    },
+    {
+      "itemId": "B-02",
+      "groupId": "G-01",
+      "questionType": "題組小題",
+      "competencyType": "推論應用",
+      "stimulus": "某組學生連續三晚在同一地點記錄同一片星空。",
+      "question": "學生發現同一晚較晚的紀錄中，星星位置整體偏向西方，最合理的推論是什麼？",
+      "options": ["星星在夜空中的位置看似會隨時間改變", "星星會在短時間內熄滅", "觀察者一定改變了地點", "天空高度角沒有任何變化"],
+      "answer": "1",
+      "explanation": "從不同時間的紀錄可推論星星位置看似移動。",
+      "objectiveIds": ["1-2-2"],
+      "score": 15,
+      "estimatedTimeSeconds": 480,
+      "discriminationPrediction": 0.44,
+      "chineseDimension": null,
+      "reviewFlags": []
+    },
+    {
+      "itemId": "B-03",
+      "groupId": "G-01",
+      "questionType": "題組小題",
+      "competencyType": "工具選用",
+      "stimulus": "某組學生連續三晚在同一地點記錄同一片星空。",
+      "question": "若學生想確認星座所在的大略方位，哪一項工具最適合搭配使用？",
+      "options": ["指南針或星空圖", "量杯", "體溫計", "彈簧秤"],
+      "answer": "1",
+      "explanation": "指南針與星空圖可協助辨認方位與星座位置。",
+      "objectiveIds": ["1-3-1"],
+      "score": 15,
+      "estimatedTimeSeconds": 480,
+      "discriminationPrediction": 0.37,
+      "chineseDimension": null,
+      "reviewFlags": []
+    },
+    {
+      "itemId": "C-01",
+      "groupId": "",
+      "questionType": "簡答題",
+      "competencyType": "資料整理",
+      "stimulus": "某組的觀測紀錄包含日期、時間、地點、天氣與三顆亮星位置。",
+      "question": "請根據紀錄內容，寫出一項可以支持觀察結論的資料。",
+      "options": [],
+      "answer": "能指出日期、時間、地點、天氣或亮星位置與結論之間的關聯即可。",
+      "explanation": "整理觀測資料時，需以紀錄中的證據支持結論。",
+      "objectiveIds": ["1-3-2", "1-3-3"],
+      "score": 20,
+      "estimatedTimeSeconds": 480,
+      "discriminationPrediction": 0.42,
+      "chineseDimension": null,
+      "reviewFlags": []
+    }
+  ]
+}

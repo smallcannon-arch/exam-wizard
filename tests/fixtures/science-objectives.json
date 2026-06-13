@@ -1,0 +1,51 @@
+[
+  {
+    "objectiveId": "1-1-1",
+    "unitName": "探索星空的奧祕",
+    "lessonName": "星空觀察入門",
+    "text": "能說明夜間觀察星空前需要準備的安全與紀錄事項。",
+    "periodCount": 2
+  },
+  {
+    "objectiveId": "1-1-2",
+    "unitName": "探索星空的奧祕",
+    "lessonName": "星空觀察入門",
+    "text": "能以方向與仰角描述夜空中亮點的大略位置。",
+    "periodCount": 2
+  },
+  {
+    "objectiveId": "1-2-1",
+    "unitName": "探索星空的奧祕",
+    "lessonName": "星座與季節",
+    "text": "能比較不同日期或時段所見星空位置的變化。",
+    "periodCount": 3
+  },
+  {
+    "objectiveId": "1-2-2",
+    "unitName": "探索星空的奧祕",
+    "lessonName": "星座與季節",
+    "text": "能依觀察紀錄推論星星在夜空中看似移動的方向。",
+    "periodCount": 3
+  },
+  {
+    "objectiveId": "1-3-1",
+    "unitName": "探索星空的奧祕",
+    "lessonName": "觀測工具與紀錄",
+    "text": "能選擇合適的工具協助辨認星空方位與星座位置。",
+    "periodCount": 2
+  },
+  {
+    "objectiveId": "1-3-2",
+    "unitName": "探索星空的奧祕",
+    "lessonName": "觀測工具與紀錄",
+    "text": "能整理星空觀測資料並提出合理的觀察結論。",
+    "periodCount": 2
+  },
+  {
+    "objectiveId": "1-3-3",
+    "unitName": "探索星空的奧祕",
+    "lessonName": "觀測工具與紀錄",
+    "text": "能檢核觀測紀錄是否包含日期、時間、地點與天氣等資訊。",
+    "periodCount": 1
+  }
+]
