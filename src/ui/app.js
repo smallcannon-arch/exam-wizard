@@ -18,6 +18,10 @@ import { parseObjectivesTsv } from "./parseObjectivesTsv.js";
 import { renumberObjectives } from "./renumberObjectives.js";
 import { summarizeCandidateSelection } from "./selectItemsFromCandidates.js";
 import { summarizeBlueprint } from "./summarizeBlueprint.js";
+import {
+  buildBlueprintFromSections,
+  summarizeSections,
+} from "./summarizeSections.js";
 import { getCanonicalSubjectLabel, isChineseSubject } from "./subjects.js";
 import {
   applyAction,
@@ -36,6 +40,7 @@ import {
 
 const STORAGE_KEY = "exam-wizard-draft";
 const QUESTION_TYPES = ["選擇題", "填充題", "應用題", "勾選題", "畫圖題", "其他"];
+const SECTION_NUMERALS = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
 const VERSION_OPTIONS = ["翰林", "康軒", "南一", "自編教材", "其他"];
 const CHINESE_DIMENSION_OPTIONS = [
   ["", "請選擇"],
@@ -576,8 +581,9 @@ function renderAiExtractionPanel() {
             </div>
           </section>
         ` : ""}
-        <section class="api-mode-block">
-          <h4>手動貼回</h4>
+        <details class="manual-fallback" ${apiAvailable ? "" : "open"}>
+          <summary>或手動貼回</summary>
+          <p class="hint-text">若一鍵擷取暫時無法使用，可複製指令到外部 AI，再把回覆貼回匯入。</p>
           <ol class="instruction-list">
             <li>複製下方指令。</li>
             <li>開啟 Claude 或 Gemini，上傳教案 PDF 並貼上指令。</li>
@@ -600,7 +606,7 @@ function renderAiExtractionPanel() {
           <div class="step-actions">
             <button class="button" type="button" data-action="import-objectives">匯入</button>
           </div>
-        </section>
+        </details>
       </div>
     </dialog>
   `;
@@ -924,85 +930,172 @@ function renderTypePlanModeSelector() {
 }
 
 function renderBlueprintStep() {
-  const rows = getBlueprintRows();
-  const summary = summarizeBlueprint(state.allocations, normalizeBlueprintForSubmit(rows));
-  const rowsByObjectiveId = new Map(rows.map((row, index) => [row.objectiveId, { row, index }]));
+  const sections = getSectionsWithDisplayTitles();
+  const summary = summarizeSections({
+    sections,
+    objectives: state.objectives,
+    allocations: state.allocations,
+  });
   const canProceed = summary.allMatched;
+  const warningClass = showBlueprintErrors ? "row-errors" : "hint-text";
 
   return `
     <section class="step-panel" aria-labelledby="current-step-title">
-      <h2 id="current-step-title">④題型規劃</h2>
-      ${renderTypePlanModeSelector()}
-      ${summary.errors.length > 0 ? `<ul class="row-errors">${summary.errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul>` : ""}
-      ${state.allocations.map((allocation) => {
-        const unitObjectives = state.objectives.filter(
-          (objective) => objective.unitName === allocation.name,
-        );
-        const unitSummary = summary.unitSummaries.find(
-          (entry) => entry.unitName === allocation.name,
+      <h2 id="current-step-title">④卷結構規劃</h2>
+      <p class="notice notice--inline">先排大題，再把已配分的學習目標歸入大題。大題配分由系統依目標配分自動加總，不需手動填分。</p>
+      ${summary.errors.length > 0 ? `<ul class="${warningClass}">${summary.errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul>` : `<p class="success-notice">大題結構已完整，總計 ${formatPrintScore(summary.totalSectionScore)} 分。</p>`}
+      <div class="step-actions">
+        <button class="button" type="button" data-action="add-section">新增大題</button>
+      </div>
+      ${state.sections.length === 0 ? `<p class="hint-text">尚未建立大題。請先新增一個大題，再指派學習目標。</p>` : ""}
+      ${sections.map((section, index) => {
+        const sectionSummary = summary.sectionSummaries.find(
+          (entry) => entry.sectionId === section.sectionId,
         );
 
         return `
-          <section class="blueprint-unit" aria-label="${escapeHtml(allocation.name)}">
-            <h3>${escapeHtml(allocation.name)}</h3>
-            <div class="table-scroll">
-              <table class="data-table blueprint-table">
-                <colgroup>
-                  <col>
-                  <col>
-                  <col class="blueprint-table__type">
-                  <col class="blueprint-table__score">
-                  <col>
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>目標編號</th>
-                    <th>目標文字</th>
-                    <th>題型</th>
-                    <th>本目標總配分</th>
-                    <th>
-                      題組規劃（選填）
-                      <span class="help-tip" tabindex="0" data-tooltip="想讓 AI 把多個目標出成同一個情境題組時，在相關目標的此欄寫下說明。內容會放進步驟 5 的出題指令，AI 會依此設計題組。留空則由 AI 自行決定是否使用題組。">?</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${unitObjectives.map((objective) => {
-                    const entry = rowsByObjectiveId.get(objective.objectiveId);
-                    const row = entry.row;
-                    const rowIssues = getBlueprintEntryIssues(row);
-                    const showIssues = showBlueprintErrors || rowIssues.length > 0;
-
-                    return `
-                      <tr
-                        class="${showIssues && rowIssues.length > 0 ? "blueprint-row--invalid" : ""}"
-                        data-blueprint-row="${entry.index}"
-                        data-objective-id="${escapeHtml(row.objectiveId)}"
-                        data-unit-name="${escapeHtml(row.unitName)}"
-                        data-type-reason="${escapeHtml(row.typeReason)}"
-                      >
-                        <td>${escapeHtml(objective.objectiveId)}</td>
-                        <td>
-                          <span class="objective-preview" title="${escapeHtml(objective.text)}">${escapeHtml(objective.text)}</span>
-                          ${row.typeReason ? `<p class="hint-text">AI 建議理由：${escapeHtml(row.typeReason)}</p>` : ""}
-                          ${showIssues && rowIssues.length > 0 ? `<ul class="row-errors">${rowIssues.map((issue) => `<li>${escapeHtml(issue)}</li>`).join("")}</ul>` : ""}
-                        </td>
-                        <td>${renderQuestionTypeControls(row, entry.index)}</td>
-                        <td><input class="blueprint-score-input" type="text" inputmode="numeric" data-blueprint-field="plannedScore" value="${escapeHtml(row.plannedScore)}"></td>
-                        <td><input data-blueprint-field="groupHint" value="${escapeHtml(row.groupHint)}" placeholder="例：與 1-2-4、1-2-5 併入同一觀星情境題組"></td>
-                      </tr>
-                    `;
-                  }).join("")}
-                </tbody>
-              </table>
+          <section class="blueprint-unit section-planner" data-section-id="${escapeHtml(section.sectionId)}">
+            <div class="section-planner__header">
+              <h3>${escapeHtml(section.title)}</h3>
+              <div class="section-planner__tools">
+                <button class="button button--secondary" type="button" data-action="reorder-section" data-section-id="${escapeHtml(section.sectionId)}" data-direction="up" ${index === 0 ? "disabled" : ""}>上移</button>
+                <button class="button button--secondary" type="button" data-action="reorder-section" data-section-id="${escapeHtml(section.sectionId)}" data-direction="down" ${index === state.sections.length - 1 ? "disabled" : ""}>下移</button>
+                <button class="button button--secondary" type="button" data-action="remove-section" data-section-id="${escapeHtml(section.sectionId)}">刪除</button>
+              </div>
             </div>
-            ${unitSummary ? renderUnitSummary(unitSummary) : ""}
+            <div class="form-grid">
+              <label>
+                <span>題型</span>
+                <select data-section-field="questionType" data-section-id="${escapeHtml(section.sectionId)}">
+                  ${QUESTION_TYPES.map((questionType) => `<option value="${escapeHtml(questionType)}" ${section.questionType === questionType ? "selected" : ""}>${escapeHtml(questionType)}</option>`).join("")}
+                  <option disabled>題組（即將推出）</option>
+                </select>
+              </label>
+              <label>
+                <span>預計題數</span>
+                <input type="number" min="1" step="1" data-section-field="plannedCount" data-section-id="${escapeHtml(section.sectionId)}" value="${escapeHtml(section.plannedCount)}">
+              </label>
+            </div>
+            <div class="objective-assignment">
+              <h4>歸入此大題的學習目標</h4>
+              ${state.objectives.map((objective) => `
+                <label class="objective-assignment__item">
+                  <input
+                    type="checkbox"
+                    data-section-objective
+                    data-section-id="${escapeHtml(section.sectionId)}"
+                    value="${escapeHtml(objective.objectiveId)}"
+                    ${section.objectiveIds.includes(objective.objectiveId) ? "checked" : ""}
+                  >
+                  <span>${escapeHtml(objective.objectiveId)}｜${escapeHtml(objective.text)}</span>
+                </label>
+              `).join("")}
+            </div>
+            ${sectionSummary?.issues.length > 0 && showBlueprintErrors ? `<ul class="row-errors">${sectionSummary.issues.map((issue) => `<li>${escapeHtml(issue)}</li>`).join("")}</ul>` : ""}
           </section>
         `;
       }).join("")}
+      ${renderSectionOverview(summary)}
       <div class="step-actions">
         <button class="button button--secondary" type="button" data-action="go-step" data-target-step="3">上一步</button>
         <button class="button" type="button" data-action="blueprint-next" ${canProceed ? "" : "disabled"}>下一步</button>
+      </div>
+    </section>
+  `;
+}
+
+function getSectionDisplayTitle(section, index) {
+  return `${SECTION_NUMERALS[index] ?? index + 1}、${section?.questionType || "選擇題"}`;
+}
+
+function getSectionsWithDisplayTitles() {
+  return [...state.sections]
+    .sort((left, right) => Number(left.order) - Number(right.order))
+    .map((section, index) => ({
+      ...section,
+      title: getSectionDisplayTitle(section, index),
+    }));
+}
+
+function getCurrentSectionSummary() {
+  return summarizeSections({
+    sections: getSectionsWithDisplayTitles(),
+    objectives: state.objectives,
+    allocations: state.allocations,
+  });
+}
+
+function renderSectionOverview(summary) {
+  const missingClass = showBlueprintErrors ? "text-error" : "hint-text";
+
+  return `
+    <section class="section-overview">
+      <h3>整卷總覽</h3>
+      <div class="overview-grid">
+        <section>
+          <h4>大題視角</h4>
+          <div class="table-scroll">
+            <table class="data-table data-table--compact">
+              <thead>
+                <tr>
+                  <th>大題</th>
+                  <th>題型</th>
+                  <th>目標</th>
+                  <th>預計題數</th>
+                  <th>自動配分</th>
+                  <th>佔比</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${summary.sectionSummaries.map((section) => `
+                  <tr>
+                    <td>${escapeHtml(section.title)}</td>
+                    <td>${escapeHtml(section.questionType)}</td>
+                    <td>${section.objectiveIds.length > 0 ? escapeHtml(section.objectiveIds.join("、")) : "尚未指派"}</td>
+                    <td class="print-number">${escapeHtml(section.plannedCount)}</td>
+                    <td class="print-number">${escapeHtml(formatPrintScore(section.score))}</td>
+                    <td class="print-number">${escapeHtml(formatPercent(section.ratio))}</td>
+                  </tr>
+                `).join("")}
+                <tr class="print-total-row">
+                  <th colspan="4">合計</th>
+                  <th>${escapeHtml(formatPrintScore(summary.totalSectionScore))}</th>
+                  <th>${escapeHtml(formatPercent(summary.totalObjectiveScore > 0 ? summary.totalSectionScore / summary.totalObjectiveScore : 0))}</th>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section>
+          <h4>目標視角</h4>
+          <p class="${summary.missingObjectiveIds.length > 0 ? missingClass : "success-notice"}">
+            ${summary.missingObjectiveIds.length > 0
+              ? `尚有 ${summary.missingObjectiveIds.length} 個學習目標未被任何大題涵蓋。`
+              : `學習目標覆蓋率 ${formatPercent(summary.coverageRate)}。`}
+          </p>
+          <div class="table-scroll">
+            <table class="data-table data-table--compact">
+              <thead>
+                <tr>
+                  <th>目標編號</th>
+                  <th>應配分</th>
+                  <th>涵蓋大題數</th>
+                  <th>狀態</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${summary.objectiveSummaries.map((objective) => `
+                  <tr>
+                    <td>${escapeHtml(objective.objectiveId)}</td>
+                    <td class="print-number">${escapeHtml(formatPrintScore(objective.score))}</td>
+                    <td class="print-number">${escapeHtml(objective.coverageCount)}</td>
+                    <td>${objective.covered ? "已涵蓋" : "未涵蓋"}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
     </section>
   `;
@@ -1051,10 +1144,6 @@ function renderPromptStep() {
   return `
     <section class="step-panel" aria-labelledby="current-step-title">
       <h2 id="current-step-title">⑤生成備選題</h2>
-      <label class="prompt-material">
-        <span>教材摘要（選填）</span>
-        <textarea data-material-text rows="5" placeholder="可自行輸入課文重點；也可以把課本內容請 AI 整理成摘要後貼入。">${escapeHtml(state.materialText)}</textarea>
-      </label>
       <label class="compact-field">
         <span>每個目標每種題型生成幾題備選</span>
         <input type="number" min="2" max="5" step="1" data-candidates-per-objective value="${escapeHtml(state.candidatesPerObjective)}">
@@ -1072,8 +1161,8 @@ function renderPromptStep() {
           </div>
         </section>
       ` : ""}
-      <section class="api-mode-block">
-        <h3>手動出題指令</h3>
+      <details class="manual-fallback" ${apiAvailable ? "" : "open"}>
+        <summary>或手動出題指令</summary>
         <p class="hint-text">按「複製指令」，貼到 Gemini、ChatGPT、Claude 等 AI 工具送出；AI 回覆題庫資料後，請到步驟 7 整段貼入。</p>
         ${result.ok ? `
           <div class="prompt-toolbar">
@@ -1082,7 +1171,7 @@ function renderPromptStep() {
           </div>
           <pre class="prompt-output" data-prompt-output tabindex="0">${escapeHtml(result.prompt)}</pre>
         ` : `<ul class="row-errors">${result.errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul>`}
-      </section>
+      </details>
       <div class="step-actions">
         <button class="button button--secondary" type="button" data-action="go-step" data-target-step="4">上一步</button>
         <button class="button" type="button" data-action="prompt-next" ${result.ok ? "" : "disabled"}>前往步驟 7 手動貼入</button>
@@ -1141,6 +1230,53 @@ function renderCandidatesByType(candidates) {
   `).join("");
 }
 
+function getCandidatesForSection(section) {
+  const sectionObjectiveIds = new Set(section.objectiveIds ?? []);
+
+  return state.candidatePool.filter((item) => {
+    if (item.sectionId === section.sectionId) {
+      return true;
+    }
+
+    if (item.sectionId) {
+      return false;
+    }
+
+    return Array.isArray(item.objectiveIds) &&
+      item.objectiveIds.some((objectiveId) => sectionObjectiveIds.has(objectiveId));
+  });
+}
+
+function renderSelectionObjectiveSummary(summary) {
+  return `
+    <details class="mapping-details">
+      <summary>查看目標配分檢查</summary>
+      <div class="table-scroll">
+        <table class="data-table data-table--compact">
+          <thead>
+            <tr>
+              <th>目標編號</th>
+              <th>已選配分</th>
+              <th>應配分</th>
+              <th>狀態</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${summary.objectiveSummaries.map((objective) => `
+              <tr>
+                <td>${escapeHtml(objective.objectiveId)}</td>
+                <td class="print-number">${escapeHtml(formatPrintScore(objective.selectedScore))}</td>
+                <td class="print-number">${escapeHtml(formatPrintScore(objective.expectedScore))}</td>
+                <td>${objective.status === "pass" ? "符合" : "需調整"}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  `;
+}
+
 function renderSelectionStep() {
   const summary = summarizeCandidateSelection({
     objectives: state.objectives,
@@ -1157,19 +1293,23 @@ function renderSelectionStep() {
       <p class="notice notice--inline">請從備選題中勾選要放入正式試卷的題目。每個學習目標的已選配分必須等於步驟 4 的本目標總配分，全卷才可進入審題檢核。</p>
       <p>目前共有 ${candidateCount} 題備選題，已選 ${summary.selectedItems.length} 題，已選總分 ${formatPrintScore(summary.totalSelectedScore)}／應選 ${formatPrintScore(summary.totalExpectedScore)} 分。</p>
       ${summary.errors.length > 0 ? `<ul class="row-errors">${summary.errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul>` : `<p class="success-notice">已選題目配分與藍圖完全一致。</p>`}
-      ${state.objectives.map((objective) => {
-        const objectiveSummary = summary.objectiveSummaries.find(
-          (entry) => entry.objectiveId === objective.objectiveId,
+      ${renderSelectionObjectiveSummary(summary)}
+      ${getSectionsWithDisplayTitles().map((section) => {
+        const candidates = getCandidatesForSection(section);
+        const selectedCandidates = candidates.filter((item) => item.selected);
+        const selectedScore = selectedCandidates.reduce(
+          (total, item) => total + (Number(item.score) || 0),
+          0,
         );
-        const candidates = getCandidatesForObjective(objective.objectiveId);
 
         return `
-          <section class="selection-objective ${objectiveSummary?.status === "pass" ? "selection-objective--pass" : "selection-objective--error"}">
-            <h3>${escapeHtml(objective.objectiveId)} ${escapeHtml(objective.text)}</h3>
-            <p class="unit-summary ${objectiveSummary?.status === "pass" ? "unit-summary--pass" : "unit-summary--error"}">
-              已選 ${formatPrintScore(objectiveSummary?.selectedScore ?? 0)} 分／應配 ${formatPrintScore(objectiveSummary?.expectedScore ?? 0)} 分
+          <section class="selection-objective">
+            <h3>${escapeHtml(section.title)}</h3>
+            <p class="unit-summary">
+              已選 ${selectedCandidates.length} 題／預計 ${escapeHtml(section.plannedCount)} 題，已選配分 ${formatPrintScore(selectedScore)} 分
             </p>
-            ${candidates.length > 0 ? renderCandidatesByType(candidates) : `<p class="field-error">此目標目前沒有備選題，請回步驟 5 重新生成或改用手動出題。</p>`}
+            <p class="hint-text">涵蓋目標：${escapeHtml((section.objectiveIds ?? []).join("、"))}</p>
+            ${candidates.length > 0 ? renderCandidatesByType(candidates) : `<p class="field-error">此大題目前沒有備選題，請回步驟 5 重新生成或改用手動出題。</p>`}
           </section>
         `;
       }).join("")}
@@ -1517,7 +1657,7 @@ function renderAuditReport() {
   const blockReason = getStepSevenBlockReason();
 
   return `
-    <section class="audit-report ${state.auditStale ? "audit-report--stale" : ""}">
+    <section class="audit-report ${state.auditStale ? "audit-report--stale" : ""}" data-audit-report tabindex="-1">
       <header class="audit-report__header">
         <h3>審題報告</h3>
         <span>${getSeverityLabel(report.overallSeverity)}</span>
@@ -1916,11 +2056,9 @@ function renderScienceScoreCell(typeResult) {
 }
 
 function renderScienceReviewBody(reviewSheet) {
-  const questionTypes = reviewSheet.scienceQuestionTypes ?? [];
-
   return `
     <section class="review-section">
-      <h2>教學目標標註試卷題號與配分</h2>
+      <h2>教學目標與配分總覽</h2>
       ${reviewSheet.notices?.length > 0 ? `
         <ul class="print-notices">
           ${reviewSheet.notices.map((notice) => `<li>${escapeHtml(notice)}</li>`).join("")}
@@ -1934,8 +2072,7 @@ function renderScienceReviewBody(reviewSheet) {
             <th>目標編號</th>
             <th>學習目標</th>
             <th>節數</th>
-            ${questionTypes.map((questionType) => `<th>${escapeHtml(questionType)}</th>`).join("")}
-            <th>總計</th>
+            <th>配分</th>
           </tr>
         </thead>
         <tbody>
@@ -1946,17 +2083,11 @@ function renderScienceReviewBody(reviewSheet) {
               <td>${escapeHtml(row.objectiveId)}</td>
               <td>${escapeHtml(row.objectiveText)}</td>
               <td class="print-number">${escapeHtml(row.periodCount)}</td>
-              ${questionTypes.map((questionType) => `
-                <td>${renderScienceScoreCell(row.byType?.[questionType])}</td>
-              `).join("")}
               <td class="print-number">${escapeHtml(formatPrintScore(row.rowTotal))}</td>
             </tr>
           `).join("")}
           <tr class="print-total-row">
             <th colspan="5">合計</th>
-            ${questionTypes.map((questionType) => `
-              <th>${escapeHtml(formatPrintScore(reviewSheet.scienceTypeTotals?.[questionType] ?? 0))}</th>
-            `).join("")}
             <th>${escapeHtml(formatPrintScore(reviewSheet.scienceGrandTotal))}</th>
           </tr>
         </tbody>
@@ -2275,23 +2406,15 @@ function handleAllocationsNext() {
 }
 
 function handleBlueprintNext() {
-  const rows = normalizeBlueprintForSubmit(collectBlueprintFromDom());
-  const summary = summarizeBlueprint(state.allocations, rows);
+  const summary = getCurrentSectionSummary();
+  const rows = buildBlueprintFromSections(summary);
 
   showBlueprintErrors = true;
 
   if (!summary.allMatched) {
-    const firstInvalidEntry = summary.invalidEntries[0];
     notice =
-      firstInvalidEntry?.issues[0] ??
       summary.errors[0] ??
-      "請確認每個單元配分與題型規劃皆已完成。";
-    state = applyAction(state, {
-      type: "SET_BLUEPRINT",
-      payload: rows,
-      updatedAt: new Date().toISOString(),
-    });
-    saveState();
+      "請確認每個大題皆有題型、題數與學習目標，且所有目標都已涵蓋。";
     render();
     return;
   }
@@ -2299,7 +2422,6 @@ function handleBlueprintNext() {
   showBlueprintErrors = false;
   notice = "";
   dispatchMany([
-    { type: "SET_TYPE_PLAN_MODE", payload: state.typePlanMode ?? "ai" },
     { type: "SET_BLUEPRINT", payload: rows },
     { type: "GO_TO_STEP", payload: 5 },
   ]);
@@ -2580,9 +2702,20 @@ async function handleGenerateItemsViaApi() {
     return;
   }
 
+  const sectionSummary = getCurrentSectionSummary();
+  const generationBlueprint = buildBlueprintFromSections(sectionSummary);
+
+  if (!sectionSummary.allMatched || generationBlueprint.length === 0) {
+    generationApiError =
+      sectionSummary.errors[0] ?? "請先完成步驟 4 的卷結構規劃。";
+    render();
+    return;
+  }
+
   const batchPlan = planItemBatches({
     objectives: state.objectives,
-    blueprint: state.blueprint,
+    blueprint: generationBlueprint,
+    sections: sectionSummary.sectionSummaries,
     perObjective: state.candidatesPerObjective,
   });
 
@@ -2604,14 +2737,14 @@ async function handleGenerateItemsViaApi() {
   const totalBatches = batchPlan.batches.length;
 
   for (const [index, batch] of batchPlan.batches.entries()) {
-    generationApiProgress = `正在生成第 ${index + 1}／共 ${totalBatches} 批（單元：${batch.unitName}）`;
+    generationApiProgress = `正在生成第 ${index + 1}／共 ${totalBatches} 批（大題：${batch.sectionTitle || batch.unitName}）`;
     render();
 
     const result = await generateItemsViaApi({
       project: state.project,
       objectives: batch.objectives,
       blueprint: batch.blueprint,
-      materialText: state.materialText,
+      materialText: "",
       perObjective: batch.perObjective,
       requestedItemCount: batch.requestedItemCount,
     });
@@ -2629,14 +2762,19 @@ async function handleGenerateItemsViaApi() {
         saveState();
       }
 
-      generationApiError = `第 ${index + 1} 批（單元：${batch.unitName}）失敗：${result.error}。已完成 ${completedItems.length} 題，可改用手動補齊。`;
+      generationApiError = `第 ${index + 1} 批（大題：${batch.sectionTitle || batch.unitName}）失敗：${result.error}。已完成 ${completedItems.length} 題，可改用手動補齊。`;
       generationApiProgress = "";
       setApiBusy(false);
       render();
       return;
     }
 
-    successfulBatchResults.push(result);
+    successfulBatchResults.push({
+      items: result.items.map((item) => ({
+        ...item,
+        sectionId: batch.sectionId,
+      })),
+    });
   }
 
   const merged = mergeItemBatches(successfulBatchResults);
@@ -2654,11 +2792,13 @@ async function handleGenerateItemsViaApi() {
   itemImportMessage = `已生成 ${merged.items.length} 題備選題，請至步驟 6 選題組卷。`;
   itemImportErrors = validationErrors.map(toTeacherFacingImportText);
   generationApiSuccess = itemImportMessage;
+  notice = `已生成 ${merged.items.length} 題備選題。`;
   generationApiProgress = "";
   editingItemIndex = null;
   itemEditErrors = [];
   setApiBusy(false);
   dispatchMany([
+    { type: "SET_BLUEPRINT", payload: generationBlueprint },
     { type: "SET_CANDIDATE_POOL", payload: merged.items },
     { type: "GO_TO_STEP", payload: 6 },
   ]);
@@ -2697,7 +2837,7 @@ function handleConfirmSelection() {
   itemImportErrors = getItemValidationErrors(summary.selectedItems).map(
     toTeacherFacingImportText,
   );
-  notice = "";
+  notice = `已選入 ${summary.selectedItems.length} 題，請執行審題檢核。`;
   dispatchMany([
     { type: "SET_ITEMS", payload: summary.selectedItems },
     { type: "GO_TO_STEP", payload: 7 },
@@ -2817,6 +2957,9 @@ function handleDeleteItem(itemIndex) {
 }
 
 function handleRunAudit() {
+  notice = "檢核中…";
+  render();
+
   const auditProject = state.project
     ? {
         ...state.project,
@@ -2829,9 +2972,21 @@ function handleRunAudit() {
     objectives: state.objectives,
     items: state.items,
   });
+  const sectionCount = Object.values(report.sections ?? {}).filter(
+    (section) => section?.severity === "warning",
+  ).length;
+  const errorCount = Object.values(report.sections ?? {}).filter(
+    (section) => section?.severity === "error",
+  ).length;
 
-  notice = "";
+  notice = `✅ 檢核完成：${sectionCount} 項警告、${errorCount} 項錯誤。`;
   dispatch({ type: "SET_AUDIT_REPORT", payload: report });
+  requestAnimationFrame(() => {
+    appRoot.querySelector("[data-audit-report]")?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  });
 }
 
 function handleConfirmRenumberObjectives() {
@@ -3046,6 +3201,37 @@ async function handleClick(event) {
     return;
   }
 
+  if (action === "add-section") {
+    showBlueprintErrors = false;
+    dispatch({ type: "ADD_SECTION" });
+    return;
+  }
+
+  if (action === "remove-section") {
+    const confirmed = window.confirm("確定要刪除此大題嗎？已生成的備選題也會需要重新產生。");
+
+    if (!confirmed) {
+      return;
+    }
+
+    dispatch({
+      type: "REMOVE_SECTION",
+      payload: actionButton.dataset.sectionId,
+    });
+    return;
+  }
+
+  if (action === "reorder-section") {
+    dispatch({
+      type: "REORDER_SECTION",
+      payload: {
+        sectionId: actionButton.dataset.sectionId,
+        direction: actionButton.dataset.direction,
+      },
+    });
+    return;
+  }
+
   if (action === "blueprint-next") {
     handleBlueprintNext();
     return;
@@ -3126,6 +3312,8 @@ async function handleClick(event) {
 function handleInput(event) {
   const projectField = event.target.closest("[data-project-field]");
   const objectiveField = event.target.closest("[data-objective-field]");
+  const sectionField = event.target.closest("[data-section-field]");
+  const sectionObjectiveField = event.target.closest("[data-section-objective]");
   const blueprintField = event.target.closest("[data-blueprint-field], [data-blueprint-type]");
   const tsvInput = event.target.closest("[data-tsv-input]");
   const extractionMaterialInput = event.target.closest("[data-extraction-material-text]");
@@ -3161,6 +3349,58 @@ function handleInput(event) {
     });
     clearRenumberFeedback();
     saveState();
+    return;
+  }
+
+  if (sectionField) {
+    const field = sectionField.dataset.sectionField;
+    const value = field === "plannedCount" ? Number(sectionField.value) : sectionField.value;
+    const action = {
+      type: "UPDATE_SECTION",
+      payload: {
+        sectionId: sectionField.dataset.sectionId,
+        [field]: value,
+      },
+      updatedAt: new Date().toISOString(),
+    };
+
+    showBlueprintErrors = false;
+
+    if (field === "plannedCount" && event.type === "input") {
+      state = applyAction(state, action);
+      saveState();
+      return;
+    }
+
+    dispatch(action);
+    return;
+  }
+
+  if (sectionObjectiveField) {
+    const sectionId = sectionObjectiveField.dataset.sectionId;
+    const section = state.sections.find((entry) => entry.sectionId === sectionId);
+
+    if (!section) {
+      return;
+    }
+
+    const objectiveId = sectionObjectiveField.value;
+    const objectiveIds = new Set(section.objectiveIds ?? []);
+
+    if (sectionObjectiveField.checked) {
+      objectiveIds.add(objectiveId);
+    } else {
+      objectiveIds.delete(objectiveId);
+    }
+
+    showBlueprintErrors = false;
+    dispatch({
+      type: "UPDATE_SECTION",
+      payload: {
+        sectionId,
+        objectiveIds: [...objectiveIds],
+      },
+    });
     return;
   }
 

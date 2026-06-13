@@ -1,0 +1,237 @@
+import { allocateScores } from "../core/allocateScores.js";
+
+const EPSILON = 1e-9;
+
+function toPositiveInteger(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : fallback;
+}
+
+function getTotalScore(allocations = []) {
+  const total = allocations.reduce(
+    (sum, allocation) => sum + (Number(allocation?.suggestedScore) || 0),
+    0,
+  );
+
+  return Number.isInteger(total) && total > 0 ? total : 100;
+}
+
+function buildObjectiveScores(objectives = [], allocations = []) {
+  const totalScore = getTotalScore(allocations);
+  const units = objectives.map((objective) => ({
+    id: objective.objectiveId,
+    name: objective.objectiveId,
+    periodCount: Number(objective.periodCount),
+  }));
+  const result = allocateScores({ totalScore, units });
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      objectiveScores: new Map(),
+      errors: result.errors,
+      totalScore,
+    };
+  }
+
+  return {
+    ok: true,
+    objectiveScores: new Map(
+      result.allocations.map((allocation) => [
+        allocation.id,
+        allocation.suggestedScore,
+      ]),
+    ),
+    errors: [],
+    totalScore,
+  };
+}
+
+function normalizeSection(section, index) {
+  const questionType =
+    typeof section?.questionType === "string" && section.questionType.trim() !== ""
+      ? section.questionType.trim()
+      : "選擇題";
+
+  return {
+    sectionId: section?.sectionId || `S-${String(index + 1).padStart(2, "0")}`,
+    order: Number.isInteger(Number(section?.order)) ? Number(section.order) : index + 1,
+    title: section?.title || `${questionType}`,
+    kind: section?.kind === "group" ? "group" : "normal",
+    questionType,
+    objectiveIds: Array.isArray(section?.objectiveIds)
+      ? [...new Set(section.objectiveIds.filter(Boolean))]
+      : [],
+    plannedCount: toPositiveInteger(section?.plannedCount, 0),
+  };
+}
+
+function getCoverageCounts(sections = []) {
+  const coverageCounts = new Map();
+
+  sections.forEach((section) => {
+    section.objectiveIds.forEach((objectiveId) => {
+      coverageCounts.set(objectiveId, (coverageCounts.get(objectiveId) ?? 0) + 1);
+    });
+  });
+
+  return coverageCounts;
+}
+
+export function summarizeSections({
+  sections = [],
+  objectives = [],
+  allocations = [],
+} = {}) {
+  const safeObjectives = Array.isArray(objectives) ? objectives : [];
+  const safeSections = Array.isArray(sections)
+    ? sections.map(normalizeSection).sort((left, right) => left.order - right.order)
+    : [];
+  const scoreResult = buildObjectiveScores(safeObjectives, allocations);
+
+  if (!scoreResult.ok) {
+    return {
+      ok: false,
+      sectionSummaries: [],
+      objectiveSummaries: [],
+      missingObjectiveIds: safeObjectives.map((objective) => objective.objectiveId),
+      invalidSectionIds: [],
+      coverageRate: 0,
+      totalSectionScore: 0,
+      totalObjectiveScore: scoreResult.totalScore,
+      allMatched: false,
+      errors: scoreResult.errors,
+    };
+  }
+
+  const objectiveById = new Map(
+    safeObjectives.map((objective) => [objective.objectiveId, objective]),
+  );
+  const coverageCounts = getCoverageCounts(safeSections);
+  const objectiveSummaries = safeObjectives.map((objective) => {
+    const objectiveId = objective.objectiveId;
+    const score = scoreResult.objectiveScores.get(objectiveId) ?? 0;
+    const coverageCount = coverageCounts.get(objectiveId) ?? 0;
+
+    return {
+      objectiveId,
+      unitName: objective.unitName,
+      lessonName: objective.lessonName,
+      text: objective.text,
+      score,
+      coverageCount,
+      covered: coverageCount > 0,
+    };
+  });
+  const sectionSummaries = safeSections.map((section) => {
+    const issues = [];
+
+    if (section.kind === "group") {
+      issues.push("題組大題將於後續任務推出，請先使用一般大題。");
+    }
+
+    if (section.objectiveIds.length === 0) {
+      issues.push("大題至少需涵蓋一個學習目標。");
+    }
+
+    if (section.plannedCount < 1) {
+      issues.push("預計題數需大於 0。");
+    }
+
+    const knownObjectiveIds = section.objectiveIds.filter((objectiveId) =>
+      objectiveById.has(objectiveId),
+    );
+    const score = knownObjectiveIds.reduce((sum, objectiveId) => {
+      const coverageCount = coverageCounts.get(objectiveId) ?? 1;
+      return sum + (scoreResult.objectiveScores.get(objectiveId) ?? 0) / coverageCount;
+    }, 0);
+
+    return {
+      ...section,
+      objectiveIds: knownObjectiveIds,
+      score,
+      ratio: scoreResult.totalScore > 0 ? score / scoreResult.totalScore : 0,
+      status: issues.length === 0 ? "pass" : "error",
+      issues,
+    };
+  });
+  const missingObjectiveIds = objectiveSummaries
+    .filter((objective) => !objective.covered)
+    .map((objective) => objective.objectiveId);
+  const invalidSectionIds = sectionSummaries
+    .filter((section) => section.status !== "pass")
+    .map((section) => section.sectionId);
+  const totalSectionScore = sectionSummaries.reduce(
+    (sum, section) => sum + section.score,
+    0,
+  );
+  const coveredCount = objectiveSummaries.filter((objective) => objective.covered).length;
+  const errors = [];
+
+  if (safeSections.length === 0) {
+    errors.push("請至少新增一個大題。");
+  }
+
+  if (missingObjectiveIds.length > 0) {
+    errors.push(`尚有 ${missingObjectiveIds.length} 個學習目標未歸入任何大題。`);
+  }
+
+  sectionSummaries.forEach((section) => {
+    section.issues.forEach((issue) => {
+      errors.push(`${section.title}：${issue}`);
+    });
+  });
+
+  if (Math.abs(totalSectionScore - scoreResult.totalScore) >= EPSILON) {
+    errors.push(`大題配分合計需為 ${scoreResult.totalScore} 分。`);
+  }
+
+  return {
+    ok:
+      errors.length === 0 &&
+      safeSections.length > 0 &&
+      Math.abs(totalSectionScore - scoreResult.totalScore) < EPSILON,
+    sectionSummaries,
+    objectiveSummaries,
+    missingObjectiveIds,
+    invalidSectionIds,
+    coverageRate:
+      objectiveSummaries.length > 0
+        ? Math.round((coveredCount / objectiveSummaries.length) * 100) / 100
+        : 0,
+    totalSectionScore,
+    totalObjectiveScore: scoreResult.totalScore,
+    allMatched:
+      errors.length === 0 &&
+      safeSections.length > 0 &&
+      Math.abs(totalSectionScore - scoreResult.totalScore) < EPSILON,
+    errors,
+  };
+}
+
+export function buildBlueprintFromSections(summary) {
+  if (!summary || !Array.isArray(summary.sectionSummaries)) {
+    return [];
+  }
+
+  const objectiveScoreById = new Map(
+    summary.objectiveSummaries.map((objective) => [objective.objectiveId, objective]),
+  );
+
+  return summary.sectionSummaries.flatMap((section) =>
+    section.objectiveIds.map((objectiveId) => {
+      const objective = objectiveScoreById.get(objectiveId);
+      const coverageCount = objective?.coverageCount || 1;
+
+      return {
+        sectionId: section.sectionId,
+        objectiveId,
+        unitName: objective?.unitName ?? "",
+        questionTypes: [section.questionType],
+        plannedScore: (objective?.score ?? 0) / coverageCount,
+        plannedCount: section.plannedCount,
+        groupHint: "",
+      };
+    }),
+  );
+}

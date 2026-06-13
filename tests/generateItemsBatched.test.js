@@ -24,6 +24,26 @@ function blueprint(objectiveId, unitName = "一、星空", questionTypes = ["選
   };
 }
 
+function section(sectionId, objectiveIds, extra = {}) {
+  return {
+    sectionId,
+    order: extra.order ?? 1,
+    title: extra.title ?? "一、選擇題",
+    kind: "normal",
+    questionType: extra.questionType ?? "選擇題",
+    objectiveIds,
+    plannedCount: extra.plannedCount ?? 4,
+    ...extra,
+  };
+}
+
+function sectionBlueprint(sectionId, objectiveId, questionTypes = ["選擇題"]) {
+  return {
+    ...blueprint(objectiveId, "一、星空", questionTypes),
+    sectionId,
+  };
+}
+
 function item(itemId, questionType, objectiveIds, extra = {}) {
   return {
     itemId,
@@ -156,6 +176,53 @@ describe("planItemBatches", () => {
     expect(result.ok).toBe(false);
     expect(result.errors[0]).toContain("1-1-1");
   });
+
+  it("以大題為單位切批並保留 sectionId", () => {
+    const result = planItemBatches({
+      objectives: [objective("1-1-1"), objective("1-1-2")],
+      sections: [
+        section("S-01", ["1-1-1"], { title: "一、選擇題", order: 1 }),
+        section("S-02", ["1-1-2"], {
+          title: "二、應用題",
+          order: 2,
+          questionType: "應用題",
+        }),
+      ],
+      blueprint: [
+        sectionBlueprint("S-01", "1-1-1"),
+        sectionBlueprint("S-02", "1-1-2", ["應用題"]),
+      ],
+      perObjective: 2,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.batches.map((batch) => batch.sectionId)).toEqual(["S-01", "S-02"]);
+    expect(result.batches.map((batch) => batch.sectionTitle)).toEqual([
+      "一、選擇題",
+      "二、應用題",
+    ]);
+    expect(result.batches.map((batch) => batch.requestedItemCount)).toEqual([2, 2]);
+  });
+
+  it("單一大題題數過多時依目標再細切", () => {
+    const objectives = Array.from({ length: 4 }, (_, index) =>
+      objective(`1-1-${index + 1}`),
+    );
+    const result = planItemBatches({
+      objectives,
+      sections: [section("S-01", objectives.map((entry) => entry.objectiveId))],
+      blueprint: objectives.map((entry) =>
+        sectionBlueprint("S-01", entry.objectiveId, ["選擇題", "填充題"]),
+      ),
+      perObjective: 2,
+      maxItemsPerBatch: 4,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.batches.length).toBeGreaterThan(1);
+    expect(result.batches.every((batch) => batch.sectionId === "S-01")).toBe(true);
+    expect(result.batches.every((batch) => batch.requestedItemCount <= 4)).toBe(true);
+  });
 });
 
 describe("mergeItemBatches", () => {
@@ -204,6 +271,16 @@ describe("mergeItemBatches", () => {
       ["1-1-1"],
       ["1-1-2"],
     ]);
+  });
+
+  it("保留 sectionId 關聯", () => {
+    const result = mergeItemBatches([
+      { items: [item("S-01-1", "選擇題", ["1-1-1"], { sectionId: "S-01" })] },
+      { items: [item("S-02-1", "應用題", ["1-1-2"], { sectionId: "S-02" })] },
+    ]);
+
+    expect(result.ok).toBe(true);
+    expect(result.items.map((entry) => entry.sectionId)).toEqual(["S-01", "S-02"]);
   });
 
   it("空批次回傳錯誤", () => {

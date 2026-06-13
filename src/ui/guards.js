@@ -1,5 +1,5 @@
 import { validateObjective } from "../core/schemas.js";
-import { summarizeBlueprint } from "./summarizeBlueprint.js";
+import { summarizeSections } from "./summarizeSections.js";
 
 function hasProject(state) {
   return state?.project !== null && typeof state?.project === "object";
@@ -17,16 +17,16 @@ function hasAllocations(state) {
   return Array.isArray(state?.allocations) && state.allocations.length > 0;
 }
 
-function hasBlueprint(state) {
-  if (!Array.isArray(state?.blueprint) || state.blueprint.length === 0) {
+function hasSectionPlan(state) {
+  if (!Array.isArray(state?.sections) || state.sections.length === 0) {
     return false;
   }
 
-  return summarizeBlueprint(state.allocations, state.blueprint).allMatched;
-}
-
-function hasTypePlanMode(state) {
-  return state?.typePlanMode === "ai" || state?.typePlanMode === "manual";
+  return summarizeSections({
+    sections: state.sections,
+    objectives: state.objectives,
+    allocations: state.allocations,
+  }).allMatched;
 }
 
 function hasPromptGenerated(state) {
@@ -75,23 +75,20 @@ const STEP_RULES = {
     { ok: hasProject, reason: "請先完成步驟 1：建立試卷。" },
     { ok: hasObjectives, reason: "請先完成步驟 2：匯入學習目標。" },
     { ok: hasAllocations, reason: "請先完成步驟 3：節數配分。" },
-    { ok: hasTypePlanMode, reason: "請先在步驟 4 選擇題型規劃模式。" },
-    { ok: hasBlueprint, reason: "請先完成步驟 4：題型規劃。" },
+    { ok: hasSectionPlan, reason: "請先完成步驟 4：卷結構規劃。" },
   ],
   6: [
     { ok: hasProject, reason: "請先完成步驟 1：建立試卷。" },
     { ok: hasObjectives, reason: "請先完成步驟 2：匯入學習目標。" },
     { ok: hasAllocations, reason: "請先完成步驟 3：節數配分。" },
-    { ok: hasTypePlanMode, reason: "請先在步驟 4 選擇題型規劃模式。" },
-    { ok: hasBlueprint, reason: "請先完成步驟 4：題型規劃。" },
+    { ok: hasSectionPlan, reason: "請先完成步驟 4：卷結構規劃。" },
     { ok: hasCandidatePool, reason: "請先完成步驟 5：生成備選題。" },
   ],
   7: [
     { ok: hasProject, reason: "請先完成步驟 1：建立試卷。" },
     { ok: hasObjectives, reason: "請先完成步驟 2：匯入學習目標。" },
     { ok: hasAllocations, reason: "請先完成步驟 3：節數配分。" },
-    { ok: hasTypePlanMode, reason: "請先在步驟 4 選擇題型規劃模式。" },
-    { ok: hasBlueprint, reason: "請先完成步驟 4：題型規劃。" },
+    { ok: hasSectionPlan, reason: "請先完成步驟 4：卷結構規劃。" },
     {
       ok: hasItems,
       reason: "請先完成步驟 6：選題組卷。",
@@ -101,7 +98,7 @@ const STEP_RULES = {
     { ok: hasProject, reason: "請先完成步驟 1：建立試卷。" },
     { ok: hasObjectives, reason: "請先完成步驟 2：匯入學習目標。" },
     { ok: hasAllocations, reason: "請先完成步驟 3：節數配分。" },
-    { ok: hasBlueprint, reason: "請先完成步驟 4：題型規劃。" },
+    { ok: hasSectionPlan, reason: "請先完成步驟 4：卷結構規劃。" },
     { ok: hasItems, reason: "請先完成步驟 6：選題組卷。" },
     { ok: hasAuditReport, reason: "請先在步驟 7 執行審題檢核。" },
     { ok: hasFreshAuditReport, reason: "題庫已變更，請重新檢核。" },

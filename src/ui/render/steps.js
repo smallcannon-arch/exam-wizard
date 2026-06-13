@@ -19,9 +19,9 @@ export const STEPS = [
   },
   {
     number: 4,
-    label: "題型規劃",
+    label: "卷結構規劃",
     descriptionHtml:
-      "請為每個學習目標規劃題型與配分。<strong>每個單元內各目標配分加總，必須恰好等於步驟 3 的單元建議配分</strong>，全數吻合才能前進。",
+      "請先排大題結構，再把學習目標歸入大題。<strong>大題配分由目標配分自動加總，不需手動指定</strong>，所有目標都被涵蓋才能前進。",
   },
   {
     number: 5,
@@ -33,7 +33,7 @@ export const STEPS = [
     number: 6,
     label: "選題組卷",
     description:
-      "選題功能即將推出。本版會先將步驟 5 生成的備選題全數帶入正式題庫，讓流程可以完整進入審題檢核。",
+      "請依大題檢視備選題，勾選要放入正式試卷的題目；目標配分與全卷總分需完全吻合，才能進入審題檢核。",
   },
   {
     number: 7,
@@ -70,7 +70,7 @@ export function getCompletedSteps(state) {
     completed.add(3);
   }
 
-  if (state.blueprint.length > 0) {
+  if (state.sections?.length > 0 && state.blueprint.length > 0) {
     completed.add(4);
   }
 

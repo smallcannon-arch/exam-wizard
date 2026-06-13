@@ -10,6 +10,7 @@ export function createInitialState() {
     objectives: [],
     allocations: [],
     typePlanMode: null,
+    sections: [],
     blueprint: [],
     materialText: "",
     promptGeneratedAt: null,
@@ -36,6 +37,63 @@ function normalizeCandidatesPerObjective(payload) {
   return Number.isInteger(value) && value >= 2 && value <= 5 ? value : 3;
 }
 
+function normalizeSection(section, index = 0) {
+  const questionType =
+    typeof section?.questionType === "string" && section.questionType.trim() !== ""
+      ? section.questionType.trim()
+      : "選擇題";
+
+  return {
+    sectionId: section?.sectionId || `S-${String(index + 1).padStart(2, "0")}`,
+    order: Number.isInteger(Number(section?.order)) ? Number(section.order) : index + 1,
+    title: typeof section?.title === "string" ? section.title : "",
+    kind: section?.kind === "group" ? "group" : "normal",
+    questionType,
+    objectiveIds: Array.isArray(section?.objectiveIds) ? [...section.objectiveIds] : [],
+    plannedCount: Number.isInteger(Number(section?.plannedCount))
+      ? Number(section.plannedCount)
+      : 1,
+    stimulusPlan: typeof section?.stimulusPlan === "string" ? section.stimulusPlan : "",
+    subQuestionPlan: Array.isArray(section?.subQuestionPlan)
+      ? [...section.subQuestionPlan]
+      : [],
+  };
+}
+
+function normalizeSections(payload) {
+  return cloneArrayPayload(payload)
+    .map(normalizeSection)
+    .sort((left, right) => left.order - right.order)
+    .map((section, index) => ({ ...section, order: index + 1 }));
+}
+
+function createDefaultSection(existingSections) {
+  const usedNumbers = new Set(
+    cloneArrayPayload(existingSections)
+      .map((section) => String(section?.sectionId ?? "").match(/^S-(\d+)/)?.[1])
+      .filter(Boolean)
+      .map(Number),
+  );
+  let nextIndex = 1;
+
+  while (usedNumbers.has(nextIndex)) {
+    nextIndex += 1;
+  }
+
+  return normalizeSection(
+    {
+      sectionId: `S-${String(nextIndex).padStart(2, "0")}`,
+      order: cloneArrayPayload(existingSections).length + 1,
+      title: "",
+      kind: "normal",
+      questionType: "選擇題",
+      objectiveIds: [],
+      plannedCount: 1,
+    },
+    nextIndex - 1,
+  );
+}
+
 function withUpdatedAt(state, action) {
   return {
     ...state,
@@ -51,6 +109,15 @@ function remapBlueprintObjectiveIds(blueprint, mapping) {
   return cloneArrayPayload(blueprint).map((entry) => ({
     ...entry,
     objectiveId: remapObjectiveId(entry?.objectiveId, mapping),
+  }));
+}
+
+function remapSectionObjectiveIds(sections, mapping) {
+  return normalizeSections(sections).map((section) => ({
+    ...section,
+    objectiveIds: section.objectiveIds.map((objectiveId) =>
+      remapObjectiveId(objectiveId, mapping),
+    ),
   }));
 }
 
@@ -83,6 +150,7 @@ export function applyAction(state, action) {
           objectives: cloneArrayPayload(currentAction.payload),
           allocations: [],
           typePlanMode: null,
+          sections: [],
           blueprint: [],
           promptGeneratedAt: null,
           candidatePool: [],
@@ -108,6 +176,122 @@ export function applyAction(state, action) {
         },
         currentAction,
       );
+    case "SET_SECTIONS":
+      return withUpdatedAt(
+        {
+          ...currentState,
+          sections: normalizeSections(currentAction.payload),
+          blueprint: [],
+          promptGeneratedAt: null,
+          candidatePool: [],
+          items: [],
+          auditReport: null,
+          auditStale: false,
+        },
+        currentAction,
+      );
+    case "ADD_SECTION":
+      return withUpdatedAt(
+        {
+          ...currentState,
+          sections: normalizeSections([
+            ...currentState.sections,
+            currentAction.payload
+              ? normalizeSection(currentAction.payload, currentState.sections.length)
+              : createDefaultSection(currentState.sections),
+          ]),
+          blueprint: [],
+          promptGeneratedAt: null,
+          candidatePool: [],
+          items: [],
+          auditReport: null,
+          auditStale: false,
+        },
+        currentAction,
+      );
+    case "UPDATE_SECTION": {
+      const payload =
+        currentAction.payload && typeof currentAction.payload === "object"
+          ? currentAction.payload
+          : {};
+      const sectionId = payload.sectionId;
+
+      return withUpdatedAt(
+        {
+          ...currentState,
+          sections: normalizeSections(
+            currentState.sections.map((section) =>
+              section.sectionId === sectionId
+                ? normalizeSection({ ...section, ...payload }, section.order - 1)
+                : section,
+            ),
+          ),
+          blueprint: [],
+          promptGeneratedAt: null,
+          candidatePool: [],
+          items: [],
+          auditReport: null,
+          auditStale: false,
+        },
+        currentAction,
+      );
+    }
+    case "REMOVE_SECTION":
+      return withUpdatedAt(
+        {
+          ...currentState,
+          sections: normalizeSections(
+            currentState.sections.filter(
+              (section) => section.sectionId !== currentAction.payload,
+            ),
+          ),
+          blueprint: [],
+          promptGeneratedAt: null,
+          candidatePool: [],
+          items: [],
+          auditReport: null,
+          auditStale: false,
+        },
+        currentAction,
+      );
+    case "REORDER_SECTION": {
+      const payload =
+        currentAction.payload && typeof currentAction.payload === "object"
+          ? currentAction.payload
+          : {};
+      const fromIndex = currentState.sections.findIndex(
+        (section) => section.sectionId === payload.sectionId,
+      );
+      const direction = payload.direction === "down" ? 1 : -1;
+      const toIndex = fromIndex + direction;
+
+      if (fromIndex < 0 || toIndex < 0 || toIndex >= currentState.sections.length) {
+        return currentState;
+      }
+
+      const nextSections = [...currentState.sections];
+      const [moved] = nextSections.splice(fromIndex, 1);
+      nextSections.splice(toIndex, 0, moved);
+
+      return withUpdatedAt(
+        {
+          ...currentState,
+          sections: normalizeSections(
+            nextSections.map((section, index) => ({
+              ...section,
+              order: index + 1,
+            })),
+          ),
+          blueprint: [],
+          promptGeneratedAt: null,
+          candidatePool: [],
+          items: [],
+          auditReport: null,
+          auditStale: false,
+        },
+        currentAction,
+      );
+    }
     case "SET_BLUEPRINT":
       return withUpdatedAt(
         {
@@ -202,6 +386,7 @@ export function applyAction(state, action) {
         {
           ...currentState,
           objectives: cloneArrayPayload(result.objectives),
+          sections: remapSectionObjectiveIds(currentState.sections, mapping),
           blueprint: remapBlueprintObjectiveIds(currentState.blueprint, mapping),
           candidatePool: remapItemObjectiveIds(currentState.candidatePool, mapping),
           items: remapItemObjectiveIds(currentState.items, mapping),
@@ -245,6 +430,7 @@ function isValidState(value) {
     Object.prototype.hasOwnProperty.call(value, "project") &&
     Array.isArray(value.objectives) &&
     Array.isArray(value.allocations) &&
+    (Array.isArray(value.sections) || value.sections === undefined) &&
     Array.isArray(value.blueprint) &&
     Array.isArray(value.items) &&
     Object.prototype.hasOwnProperty.call(value, "auditReport") &&
@@ -270,6 +456,7 @@ export function deserializeState(json) {
         objectives: [...parsed.objectives],
         allocations: [...parsed.allocations],
         typePlanMode: normalizeTypePlanMode(parsed.typePlanMode),
+        sections: normalizeSections(parsed.sections),
         blueprint: [...parsed.blueprint],
         materialText:
           typeof parsed.materialText === "string" ? parsed.materialText : "",

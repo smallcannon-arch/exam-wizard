@@ -18,11 +18,22 @@ const validAllocation = {
 };
 
 const validBlueprint = {
+  sectionId: "S-01",
   objectiveId: "1-1-1",
   unitName: "一、探索星空的奧祕",
   questionTypes: ["選擇題"],
   plannedScore: 100,
   groupHint: "",
+};
+
+const validSection = {
+  sectionId: "S-01",
+  order: 1,
+  title: "一、選擇題",
+  kind: "normal",
+  questionType: "選擇題",
+  objectiveIds: ["1-1-1"],
+  plannedCount: 10,
 };
 
 function withProject(state = createInitialState()) {
@@ -49,8 +60,8 @@ function readyForStep4() {
 function readyForStep5() {
   return applyAction(
     applyAction(readyForStep4(), {
-      type: "SET_TYPE_PLAN_MODE",
-      payload: "manual",
+      type: "SET_SECTIONS",
+      payload: [validSection],
     }),
     {
       type: "SET_BLUEPRINT",
@@ -117,30 +128,24 @@ describe("ui guards", () => {
     });
   });
 
-  it("步驟 4 到 5 需藍圖全數吻合", () => {
-    const missingModeState = applyAction(readyForStep4(), {
+  it("步驟 4 到 5 需卷結構涵蓋所有目標", () => {
+    const noSectionState = applyAction(readyForStep4(), {
       type: "SET_BLUEPRINT",
       payload: [validBlueprint],
     });
-    const badBlueprintState = applyAction(
-      applyAction(readyForStep4(), {
-        type: "SET_TYPE_PLAN_MODE",
-        payload: "manual",
-      }),
-      {
-        type: "SET_BLUEPRINT",
-        payload: [{ ...validBlueprint, plannedScore: 99 }],
-      },
-    );
-
-    expect(canEnterStep(missingModeState, 5)).toEqual({
-      allowed: false,
-      reason: "請先在步驟 4 選擇題型規劃模式。",
+    const emptySectionState = applyAction(readyForStep4(), {
+      type: "SET_SECTIONS",
+      payload: [{ ...validSection, objectiveIds: [] }],
     });
 
-    expect(canEnterStep(badBlueprintState, 5)).toEqual({
+    expect(canEnterStep(noSectionState, 5)).toEqual({
       allowed: false,
-      reason: "請先完成步驟 4：題型規劃。",
+      reason: "請先完成步驟 4：卷結構規劃。",
+    });
+
+    expect(canEnterStep(emptySectionState, 5)).toEqual({
+      allowed: false,
+      reason: "請先完成步驟 4：卷結構規劃。",
     });
     expect(canEnterStep(readyForStep5(), 5)).toEqual({
       allowed: true,

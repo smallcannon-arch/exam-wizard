@@ -14,6 +14,7 @@ describe("ui state", () => {
       objectives: [],
       allocations: [],
       typePlanMode: null,
+      sections: [],
       blueprint: [],
       materialText: "",
       promptGeneratedAt: null,
@@ -51,7 +52,22 @@ describe("ui state", () => {
       payload: "manual",
       updatedAt,
     });
-    const blueprintState = applyAction(modeState, {
+    const sectionsState = applyAction(modeState, {
+      type: "SET_SECTIONS",
+      payload: [
+        {
+          sectionId: "S-01",
+          order: 1,
+          title: "一、選擇題",
+          kind: "normal",
+          questionType: "選擇題",
+          objectiveIds: ["O-1"],
+          plannedCount: 10,
+        },
+      ],
+      updatedAt,
+    });
+    const blueprintState = applyAction(sectionsState, {
       type: "SET_BLUEPRINT",
       payload: [{ objectiveId: "O-1", plannedScore: 100 }],
       updatedAt,
@@ -102,6 +118,12 @@ describe("ui state", () => {
     expect(objectivesState.objectives).toEqual([{ objectiveId: "O-1" }]);
     expect(allocationsState.allocations).toEqual([{ id: "U1", suggestedScore: 100 }]);
     expect(modeState.typePlanMode).toBe("manual");
+    expect(sectionsState.sections[0]).toMatchObject({
+      sectionId: "S-01",
+      questionType: "選擇題",
+      objectiveIds: ["O-1"],
+      plannedCount: 10,
+    });
     expect(blueprintState.blueprint).toEqual([{ objectiveId: "O-1", plannedScore: 100 }]);
     expect(materialState.materialText).toBe("教材摘要");
     expect(promptState.promptGeneratedAt).toBe(updatedAt);
@@ -193,6 +215,53 @@ describe("ui state", () => {
     expect(result.auditStale).toBe(false);
   });
 
+  it("sections 的新增、更新、刪除、排序皆不可變更新", () => {
+    const original = createInitialState();
+    const added = applyAction(original, {
+      type: "ADD_SECTION",
+      updatedAt: "2026-06-13T10:00:00+08:00",
+    });
+    const secondAdded = applyAction(added, {
+      type: "ADD_SECTION",
+    });
+    const updated = applyAction(secondAdded, {
+      type: "UPDATE_SECTION",
+      payload: {
+        sectionId: "S-01",
+        questionType: "應用題",
+        objectiveIds: ["1-1-1"],
+        plannedCount: 3,
+      },
+    });
+    const reordered = applyAction(updated, {
+      type: "REORDER_SECTION",
+      payload: { sectionId: "S-02", direction: "up" },
+    });
+    const removed = applyAction(reordered, {
+      type: "REMOVE_SECTION",
+      payload: "S-01",
+    });
+
+    expect(original.sections).toEqual([]);
+    expect(added.sections).toHaveLength(1);
+    expect(secondAdded.sections.map((section) => section.sectionId)).toEqual([
+      "S-01",
+      "S-02",
+    ]);
+    expect(updated.sections[0]).toMatchObject({
+      questionType: "應用題",
+      objectiveIds: ["1-1-1"],
+      plannedCount: 3,
+    });
+    expect(reordered.sections.map((section) => section.sectionId)).toEqual([
+      "S-02",
+      "S-01",
+    ]);
+    expect(removed.sections.map((section) => section.sectionId)).toEqual(["S-02"]);
+    expect(updated.blueprint).toEqual([]);
+    expect(updated.candidatePool).toEqual([]);
+  });
+
   it("items 變更後 auditReport 會標記為過期", () => {
     const itemState = applyAction(createInitialState(), {
       type: "SET_ITEMS",
@@ -239,6 +308,17 @@ describe("ui state", () => {
           plannedScore: 50,
         },
       ],
+      sections: [
+        {
+          sectionId: "S-01",
+          order: 1,
+          title: "一、選擇題",
+          kind: "normal",
+          questionType: "選擇題",
+          objectiveIds: ["17", "18"],
+          plannedCount: 2,
+        },
+      ],
       candidatePool: [{ itemId: "C-01", objectiveIds: ["17"] }],
       items: [{ itemId: "A-01", objectiveIds: ["17", "18", "9-9-9"] }],
       auditReport: { overallSeverity: "pass" },
@@ -254,6 +334,7 @@ describe("ui state", () => {
       "4-2-2",
     ]);
     expect(result.blueprint[0].objectiveId).toBe("4-2-1");
+    expect(result.sections[0].objectiveIds).toEqual(["4-2-1", "4-2-2"]);
     expect(result.candidatePool[0].objectiveIds).toEqual(["4-2-1"]);
     expect(result.items[0].objectiveIds).toEqual(["4-2-1", "4-2-2", "9-9-9"]);
     expect(result.auditStale).toBe(true);

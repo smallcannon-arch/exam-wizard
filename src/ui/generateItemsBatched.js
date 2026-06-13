@@ -28,7 +28,14 @@ function countEntryItems(entry, perObjective) {
   return getQuestionTypes(entry).length * perObjective;
 }
 
-function createBatch(batchNumber, unitName, objectives, blueprint, perObjective) {
+function createBatch(
+  batchNumber,
+  unitName,
+  objectives,
+  blueprint,
+  perObjective,
+  metadata = {},
+) {
   const requestedItemCount = blueprint.reduce(
     (total, entry) => total + countEntryItems(entry, perObjective),
     0,
@@ -41,6 +48,7 @@ function createBatch(batchNumber, unitName, objectives, blueprint, perObjective)
     blueprint: blueprint.map((entry) => ({ ...entry })),
     perObjective,
     requestedItemCount,
+    ...metadata,
   };
 }
 
@@ -82,9 +90,172 @@ function splitOversizedObjective({
   return { batches, nextBatchNumber };
 }
 
+function planSectionItemBatches({
+  objectives,
+  blueprint,
+  sections,
+  perObjective,
+  maxItemsPerBatch,
+}) {
+  const objectiveById = new Map(
+    objectives.map((objective) => [String(objective?.objectiveId ?? ""), objective]),
+  );
+  const blueprintBySectionAndObjective = new Map();
+
+  blueprint.forEach((entry) => {
+    const key = `${entry?.sectionId ?? ""}::${entry?.objectiveId ?? ""}`;
+    const entries = blueprintBySectionAndObjective.get(key) ?? [];
+    entries.push(entry);
+    blueprintBySectionAndObjective.set(key, entries);
+  });
+
+  const batches = [];
+  const errors = [];
+  let nextBatchNumber = 1;
+
+  sections
+    .filter((section) => section?.kind !== "group")
+    .sort((left, right) => Number(left.order) - Number(right.order))
+    .forEach((section) => {
+      const sectionObjectives = [];
+      const sectionBlueprint = [];
+
+      (Array.isArray(section.objectiveIds) ? section.objectiveIds : []).forEach(
+        (objectiveId) => {
+          const objective = objectiveById.get(String(objectiveId));
+
+          if (!objective) {
+            return;
+          }
+
+          const entries =
+            blueprintBySectionAndObjective.get(`${section.sectionId}::${objectiveId}`) ??
+            [];
+
+          if (entries.length === 0) {
+            errors.push(`大題 ${section.title || section.sectionId} 缺少 ${objectiveId} 的生成規劃。`);
+            return;
+          }
+
+          sectionObjectives.push(objective);
+          sectionBlueprint.push(...entries);
+        },
+      );
+
+      const sectionRequestedCount = sectionBlueprint.reduce(
+        (total, entry) => total + countEntryItems(entry, perObjective),
+        0,
+      );
+      const metadata = {
+        sectionId: section.sectionId,
+        sectionTitle: section.title,
+        questionType: section.questionType,
+      };
+
+      if (sectionObjectives.length === 0 || sectionBlueprint.length === 0) {
+        errors.push(`大題 ${section.title || section.sectionId} 缺少可生成的學習目標。`);
+        return;
+      }
+
+      if (sectionRequestedCount <= maxItemsPerBatch) {
+        batches.push(
+          createBatch(
+            nextBatchNumber,
+            section.title || section.sectionId,
+            sectionObjectives,
+            sectionBlueprint,
+            perObjective,
+            metadata,
+          ),
+        );
+        nextBatchNumber += 1;
+        return;
+      }
+
+      let currentObjectives = [];
+      let currentBlueprint = [];
+      let currentCount = 0;
+
+      sectionObjectives.forEach((objective) => {
+        const entries =
+          blueprintBySectionAndObjective.get(
+            `${section.sectionId}::${objective.objectiveId}`,
+          ) ?? [];
+        const objectiveCount = entries.reduce(
+          (total, entry) => total + countEntryItems(entry, perObjective),
+          0,
+        );
+
+        if (
+          currentObjectives.length > 0 &&
+          currentCount + objectiveCount > maxItemsPerBatch
+        ) {
+          batches.push(
+            createBatch(
+              nextBatchNumber,
+              section.title || section.sectionId,
+              currentObjectives,
+              currentBlueprint,
+              perObjective,
+              metadata,
+            ),
+          );
+          nextBatchNumber += 1;
+          currentObjectives = [];
+          currentBlueprint = [];
+          currentCount = 0;
+        }
+
+        if (objectiveCount > maxItemsPerBatch) {
+          const split = splitOversizedObjective({
+            batchNumber: nextBatchNumber,
+            unitName: section.title || section.sectionId,
+            objective,
+            entries,
+            perObjective,
+            maxItemsPerBatch,
+          });
+          batches.push(
+            ...split.batches.map((batch) => ({
+              ...batch,
+              ...metadata,
+            })),
+          );
+          nextBatchNumber = split.nextBatchNumber;
+          return;
+        }
+
+        currentObjectives.push(objective);
+        currentBlueprint.push(...entries);
+        currentCount += objectiveCount;
+      });
+
+      if (currentObjectives.length > 0) {
+        batches.push(
+          createBatch(
+            nextBatchNumber,
+            section.title || section.sectionId,
+            currentObjectives,
+            currentBlueprint,
+            perObjective,
+            metadata,
+          ),
+        );
+        nextBatchNumber += 1;
+      }
+    });
+
+  if (errors.length > 0) {
+    return { ok: false, batches: [], errors };
+  }
+
+  return { ok: true, batches, errors: [] };
+}
+
 export function planItemBatches({
   objectives,
   blueprint,
+  sections = null,
   perObjective = 1,
   maxItemsPerBatch = DEFAULT_MAX_ITEMS_PER_BATCH,
 }) {
@@ -101,6 +272,17 @@ export function planItemBatches({
     maxItemsPerBatch,
     DEFAULT_MAX_ITEMS_PER_BATCH,
   );
+
+  if (Array.isArray(sections) && sections.length > 0) {
+    return planSectionItemBatches({
+      objectives,
+      blueprint,
+      sections,
+      perObjective: safePerObjective,
+      maxItemsPerBatch: safeMaxItemsPerBatch,
+    });
+  }
+
   const blueprintByObjective = new Map();
 
   blueprint.forEach((entry) => {

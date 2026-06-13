@@ -18,12 +18,17 @@ function isSelected(item, selectedItemIds) {
 }
 
 function buildTargetMap(blueprint = []) {
-  return new Map(
-    blueprint.map((entry) => [
-      String(entry?.objectiveId ?? ""),
-      toNumber(entry?.plannedScore),
-    ]),
-  );
+  const targetMap = new Map();
+
+  blueprint.forEach((entry) => {
+    const objectiveId = String(entry?.objectiveId ?? "");
+    targetMap.set(
+      objectiveId,
+      (targetMap.get(objectiveId) ?? 0) + toNumber(entry?.plannedScore),
+    );
+  });
+
+  return targetMap;
 }
 
 function cleanSelectedItem(item, index) {
