@@ -121,6 +121,7 @@ const groupItems = [
     itemId: "G-01-1",
     groupId: "G-01",
     questionType: "選擇題",
+    stimulusTitle: "閱讀觀察紀錄，回答第 1～2 題。",
     stimulus: "小組在夜間記錄星星的位置。",
     question: "小題一",
     options: ["甲", "乙", "丙"],
@@ -128,11 +129,13 @@ const groupItems = [
     explanation: "解析一",
     objectiveIds: ["1-1-1"],
     score: 10,
+    cognitiveLevel: "提取",
   },
   {
     itemId: "G-01-2",
     groupId: "G-01",
     questionType: "應用題",
+    stimulusTitle: "閱讀觀察紀錄，回答第 1～2 題。",
     stimulus: "小組在夜間記錄星星的位置。",
     question: "小題二",
     options: [],
@@ -140,6 +143,7 @@ const groupItems = [
     explanation: "解析二",
     objectiveIds: ["1-2-1"],
     score: 10,
+    cognitiveLevel: "整合",
   },
 ];
 
@@ -250,11 +254,13 @@ describe("buildPrintData", () => {
     );
 
     expect(groupSection.groups).toHaveLength(1);
+    expect(groupSection.groups[0].stimulusTitle).toBe("閱讀觀察紀錄，回答第 1～2 題。");
     expect(groupSection.groups[0].stimulus).toBe("小組在夜間記錄星星的位置。");
     expect(groupSection.groups[0].items.map((entry) => entry.item.itemId)).toEqual([
       "G-01-1",
       "G-01-2",
     ]);
+    expect(groupSection.groups[0].items[1].item.cognitiveLevel).toBe("整合");
   });
 
   it("自然格式 scienceRows 逐目標列出題型、題號、配分與合計", () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyCandidateSelection,
   buildSelectedItemsFromCandidates,
   summarizeCandidateSelection,
 } from "../src/ui/selectItemsFromCandidates.js";
@@ -139,5 +140,38 @@ describe("summarizeCandidateSelection", () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ itemId: "A-01", question: "題目 C-02" });
     expect(pool[1].itemId).toBe("C-02");
+  });
+
+  it("題組候選題會整組選入並納入各目標配分", () => {
+    const pool = [
+      candidate("G-01-1", ["1-1-1"], 20, false),
+      candidate("G-01-2", ["1-1-2"], 10, false),
+      candidate("C-03", ["1-1-1"], 5, false),
+    ].map((item, index) =>
+      index < 2 ? { ...item, groupId: "G-01", cognitiveLevel: index === 0 ? "提取" : "整合" } : item,
+    );
+    const selectedPool = applyCandidateSelection(pool, "G-01-1", true);
+    const result = summarizeCandidateSelection({
+      objectives,
+      blueprint,
+      candidatePool: selectedPool,
+    });
+
+    expect(selectedPool[0].selected).toBe(true);
+    expect(selectedPool[1].selected).toBe(true);
+    expect(selectedPool[2].selected).toBe(false);
+    expect(result.allMatched).toBe(true);
+    expect(result.selectedItems.map((item) => item.groupId)).toEqual(["G-01", "G-01"]);
+  });
+
+  it("題組候選題會整組取消選入", () => {
+    const pool = [
+      { ...candidate("G-01-1", ["1-1-1"], 20, true), groupId: "G-01" },
+      { ...candidate("G-01-2", ["1-1-2"], 10, true), groupId: "G-01" },
+    ];
+    const result = applyCandidateSelection(pool, "G-01-2", false);
+
+    expect(result.map((item) => item.selected)).toEqual([false, false]);
+    expect(pool.map((item) => item.selected)).toEqual([true, true]);
   });
 });

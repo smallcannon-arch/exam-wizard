@@ -38,21 +38,34 @@ function normalizeCandidatesPerObjective(payload) {
 }
 
 function normalizeSection(section, index = 0) {
+  const kind = section?.kind === "group" ? "group" : "normal";
   const questionType =
-    typeof section?.questionType === "string" && section.questionType.trim() !== ""
+    kind === "group"
+      ? "題組"
+      : typeof section?.questionType === "string" && section.questionType.trim() !== ""
       ? section.questionType.trim()
       : "選擇題";
+  const textMode = section?.textMode === "provided" ? "provided" : "ai";
+  const subCount = Number(section?.subCount ?? section?.plannedCount);
+  const plannedCount = Number.isInteger(Number(section?.plannedCount))
+    ? Number(section.plannedCount)
+    : Number.isInteger(subCount)
+      ? subCount
+      : 1;
 
   return {
     sectionId: section?.sectionId || `S-${String(index + 1).padStart(2, "0")}`,
     order: Number.isInteger(Number(section?.order)) ? Number(section.order) : index + 1,
     title: typeof section?.title === "string" ? section.title : "",
-    kind: section?.kind === "group" ? "group" : "normal",
+    kind,
     questionType,
     objectiveIds: Array.isArray(section?.objectiveIds) ? [...section.objectiveIds] : [],
-    plannedCount: Number.isInteger(Number(section?.plannedCount))
-      ? Number(section.plannedCount)
-      : 1,
+    plannedCount,
+    textMode,
+    providedText:
+      typeof section?.providedText === "string" ? section.providedText : "",
+    topicHint: typeof section?.topicHint === "string" ? section.topicHint : "",
+    subCount: Number.isInteger(subCount) && subCount > 0 ? subCount : plannedCount,
     stimulusPlan: typeof section?.stimulusPlan === "string" ? section.stimulusPlan : "",
     subQuestionPlan: Array.isArray(section?.subQuestionPlan)
       ? [...section.subQuestionPlan]
@@ -89,6 +102,10 @@ function createDefaultSection(existingSections) {
       questionType: "選擇題",
       objectiveIds: [],
       plannedCount: 1,
+      textMode: "ai",
+      providedText: "",
+      topicHint: "",
+      subCount: 3,
     },
     nextIndex - 1,
   );

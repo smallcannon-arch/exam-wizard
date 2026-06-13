@@ -48,22 +48,36 @@ function buildObjectiveScores(objectives = [], allocations = []) {
 }
 
 function normalizeSection(section, index) {
+  const kind = section?.kind === "group" ? "group" : "normal";
   const questionType =
-    typeof section?.questionType === "string" && section.questionType.trim() !== ""
+    kind === "group"
+      ? "題組"
+      : typeof section?.questionType === "string" && section.questionType.trim() !== ""
       ? section.questionType.trim()
       : "選擇題";
+  const subCount = Number(section?.subCount ?? section?.plannedCount);
+  const plannedCount = toPositiveInteger(section?.plannedCount, toPositiveInteger(subCount, 0));
 
   return {
     sectionId: section?.sectionId || `S-${String(index + 1).padStart(2, "0")}`,
     order: Number.isInteger(Number(section?.order)) ? Number(section.order) : index + 1,
     title: section?.title || `${questionType}`,
-    kind: section?.kind === "group" ? "group" : "normal",
+    kind,
     questionType,
     objectiveIds: Array.isArray(section?.objectiveIds)
       ? [...new Set(section.objectiveIds.filter(Boolean))]
       : [],
-    plannedCount: toPositiveInteger(section?.plannedCount, 0),
+    plannedCount,
+    textMode: section?.textMode === "provided" ? "provided" : "ai",
+    providedText:
+      typeof section?.providedText === "string" ? section.providedText : "",
+    topicHint: typeof section?.topicHint === "string" ? section.topicHint : "",
+    subCount: toPositiveInteger(subCount, plannedCount),
   };
+}
+
+function hasText(value) {
+  return typeof value === "string" && value.trim() !== "";
 }
 
 function getCoverageCounts(sections = []) {
@@ -127,14 +141,20 @@ export function summarizeSections({
     const issues = [];
 
     if (section.kind === "group") {
-      issues.push("題組大題將於後續任務推出，請先使用一般大題。");
+      if (section.subCount < 1) {
+        issues.push("題組小題數需大於 0。");
+      }
+
+      if (section.textMode === "provided" && !hasText(section.providedText)) {
+        issues.push("自行提供文本模式需填入題組文本。");
+      }
     }
 
     if (section.objectiveIds.length === 0) {
       issues.push("大題至少需涵蓋一個學習目標。");
     }
 
-    if (section.plannedCount < 1) {
+    if (section.kind !== "group" && section.plannedCount < 1) {
       issues.push("預計題數需大於 0。");
     }
 
@@ -229,7 +249,7 @@ export function buildBlueprintFromSections(summary) {
         unitName: objective?.unitName ?? "",
         questionTypes: [section.questionType],
         plannedScore: (objective?.score ?? 0) / coverageCount,
-        plannedCount: section.plannedCount,
+        plannedCount: section.kind === "group" ? section.subCount : section.plannedCount,
         groupHint: "",
       };
     }),

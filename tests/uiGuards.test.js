@@ -36,6 +36,20 @@ const validSection = {
   plannedCount: 10,
 };
 
+const validGroupSection = {
+  sectionId: "S-02",
+  order: 1,
+  title: "一、題組",
+  kind: "group",
+  questionType: "題組",
+  objectiveIds: ["1-1-1"],
+  plannedCount: 3,
+  subCount: 3,
+  textMode: "provided",
+  providedText: "一段觀察紀錄文本。",
+  topicHint: "",
+};
+
 function withProject(state = createInitialState()) {
   return applyAction(state, {
     type: "SET_PROJECT",
@@ -148,6 +162,32 @@ describe("ui guards", () => {
       reason: "請先完成步驟 4：卷結構規劃。",
     });
     expect(canEnterStep(readyForStep5(), 5)).toEqual({
+      allowed: true,
+      reason: "",
+    });
+  });
+
+  it("題組大題需完成文本來源、小題數與目標設定才可進入步驟 5", () => {
+    const missingTextState = applyAction(readyForStep4(), {
+      type: "SET_SECTIONS",
+      payload: [{ ...validGroupSection, providedText: "" }],
+    });
+    const validGroupState = applyAction(
+      applyAction(readyForStep4(), {
+        type: "SET_SECTIONS",
+        payload: [validGroupSection],
+      }),
+      {
+        type: "SET_BLUEPRINT",
+        payload: [{ ...validBlueprint, sectionId: "S-02", questionTypes: ["題組"] }],
+      },
+    );
+
+    expect(canEnterStep(missingTextState, 5)).toEqual({
+      allowed: false,
+      reason: "請先完成步驟 4：卷結構規劃。",
+    });
+    expect(canEnterStep(validGroupState, 5)).toEqual({
       allowed: true,
       reason: "",
     });

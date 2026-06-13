@@ -131,3 +131,63 @@ describe("normalizeApiResult 題型建議", () => {
     expect(result.error).toContain("第 1 筆題型建議");
   });
 });
+
+describe("normalizeApiResult 題組生成", () => {
+  const group = {
+    stimulus: "一段觀察紀錄文本。",
+    stimulusTitle: "閱讀下文，回答第 1～2 題。",
+    subItems: [
+      {
+        question: "第一小題",
+        options: ["甲", "乙", "丙"],
+        answer: "1",
+        explanation: "解析一",
+        objectiveId: "4-1-1",
+        cognitiveLevel: "提取",
+        questionType: "選擇題",
+      },
+      {
+        question: "第二小題",
+        options: [],
+        answer: "可依資料推論",
+        explanation: "解析二",
+        objectiveId: "4-1-1",
+        cognitiveLevel: "整合",
+        questionType: "應用題",
+      },
+    ],
+  };
+
+  it("group 成功時回傳題組資料", () => {
+    expect(normalizeApiResult({ ok: true, group }, "group")).toEqual({
+      ok: true,
+      group,
+    });
+  });
+
+  it("group 缺小題時回傳可讀錯誤", () => {
+    const result = normalizeApiResult(
+      { ok: true, group: { ...group, subItems: [] } },
+      "group",
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("題組格式");
+  });
+
+  it("group cognitiveLevel 型別或值錯誤時回傳可讀錯誤", () => {
+    const result = normalizeApiResult(
+      {
+        ok: true,
+        group: {
+          ...group,
+          subItems: [{ ...group.subItems[0], cognitiveLevel: "記憶" }],
+        },
+      },
+      "group",
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("題組格式");
+  });
+});

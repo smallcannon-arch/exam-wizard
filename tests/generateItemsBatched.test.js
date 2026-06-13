@@ -204,6 +204,29 @@ describe("planItemBatches", () => {
     expect(result.batches.map((batch) => batch.requestedItemCount)).toEqual([2, 2]);
   });
 
+  it("題組大題不納入一般題批次，保留給 generate-group 處理", () => {
+    const result = planItemBatches({
+      objectives: [objective("1-1-1"), objective("1-1-2")],
+      sections: [
+        section("S-01", ["1-1-1"], { kind: "group", questionType: "題組" }),
+        section("S-02", ["1-1-2"], {
+          title: "二、選擇題",
+          order: 2,
+          questionType: "選擇題",
+        }),
+      ],
+      blueprint: [
+        sectionBlueprint("S-01", "1-1-1", ["題組"]),
+        sectionBlueprint("S-02", "1-1-2", ["選擇題"]),
+      ],
+      perObjective: 3,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.batches).toHaveLength(1);
+    expect(result.batches[0].sectionId).toBe("S-02");
+  });
+
   it("單一大題題數過多時依目標再細切", () => {
     const objectives = Array.from({ length: 4 }, (_, index) =>
       objective(`1-1-${index + 1}`),

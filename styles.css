@@ -654,6 +654,10 @@ textarea:focus-visible {
   background: #f4f8fb;
 }
 
+.candidate-card--group {
+  border-left: 4px solid var(--color-primary);
+}
+
 .candidate-card p {
   margin: 0.25rem 0;
 }
@@ -663,6 +667,15 @@ textarea:focus-visible {
   align-items: center;
   gap: 0.4rem;
   font-weight: 700;
+}
+
+.candidate-subitems {
+  margin: 0.5rem 0 0;
+  padding-left: 1.4rem;
+}
+
+.candidate-subitems li + li {
+  margin-top: 0.35rem;
 }
 
 .input-invalid {

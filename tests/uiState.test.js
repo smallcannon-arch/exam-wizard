@@ -228,9 +228,13 @@ describe("ui state", () => {
       type: "UPDATE_SECTION",
       payload: {
         sectionId: "S-01",
-        questionType: "應用題",
+        kind: "group",
+        questionType: "題組",
+        textMode: "provided",
+        providedText: "題組文本",
+        subCount: 4,
+        plannedCount: 4,
         objectiveIds: ["1-1-1"],
-        plannedCount: 3,
       },
     });
     const reordered = applyAction(updated, {
@@ -249,9 +253,13 @@ describe("ui state", () => {
       "S-02",
     ]);
     expect(updated.sections[0]).toMatchObject({
-      questionType: "應用題",
+      kind: "group",
+      questionType: "題組",
+      textMode: "provided",
+      providedText: "題組文本",
+      subCount: 4,
       objectiveIds: ["1-1-1"],
-      plannedCount: 3,
+      plannedCount: 4,
     });
     expect(reordered.sections.map((section) => section.sectionId)).toEqual([
       "S-02",

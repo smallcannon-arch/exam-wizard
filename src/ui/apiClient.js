@@ -86,6 +86,31 @@ function isValidTypeSuggestion(suggestion) {
   );
 }
 
+function isValidGroupSubItem(subItem) {
+  return (
+    isPlainObject(subItem) &&
+    hasText(subItem.question) &&
+    Array.isArray(subItem.options) &&
+    subItem.options.every((option) => typeof option === "string") &&
+    typeof subItem.answer === "string" &&
+    typeof subItem.explanation === "string" &&
+    hasText(subItem.objectiveId) &&
+    ["提取", "推論", "整合", "評估"].includes(subItem.cognitiveLevel) &&
+    hasText(subItem.questionType)
+  );
+}
+
+function isValidGroup(group) {
+  return (
+    isPlainObject(group) &&
+    typeof group.stimulus === "string" &&
+    typeof group.stimulusTitle === "string" &&
+    Array.isArray(group.subItems) &&
+    group.subItems.length > 0 &&
+    group.subItems.every(isValidGroupSubItem)
+  );
+}
+
 export function normalizeApiResult(raw, kind) {
   if (!isPlainObject(raw)) {
     return createError("AI 回覆格式不正確，請改用手動貼回。");
@@ -101,6 +126,17 @@ export function normalizeApiResult(raw, kind) {
 
   if (kind === "typeSuggestions") {
     return normalizeTypeSuggestionsResult(raw);
+  }
+
+  if (kind === "group") {
+    if (!isValidGroup(raw.group)) {
+      return createError("AI 回覆的題組格式不完整，請重試或改用手動出題指令。");
+    }
+
+    return {
+      ok: true,
+      group: raw.group,
+    };
   }
 
   if (kind === "objectives") {
@@ -249,5 +285,27 @@ export function suggestTypesViaApi({ project, objectives }) {
       objectives,
     },
     "typeSuggestions",
+  );
+}
+
+export function generateGroupViaApi({
+  project,
+  textMode,
+  providedText,
+  topicHint,
+  objectives,
+  subCount,
+}) {
+  return postApi(
+    "/generate-group",
+    {
+      project,
+      textMode,
+      providedText,
+      topicHint,
+      objectives,
+      subCount,
+    },
+    "group",
   );
 }

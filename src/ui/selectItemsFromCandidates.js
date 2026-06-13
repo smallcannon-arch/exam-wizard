@@ -17,6 +17,10 @@ function isSelected(item, selectedItemIds) {
   return item?.selected === true;
 }
 
+function hasGroupId(item) {
+  return typeof item?.groupId === "string" && item.groupId.trim() !== "";
+}
+
 function buildTargetMap(blueprint = []) {
   const targetMap = new Map();
 
@@ -48,6 +52,32 @@ export function buildSelectedItemsFromCandidates(candidatePool = [], selectedIte
   return candidatePool
     .filter((item) => isSelected(item, selectedItemIds))
     .map((item, index) => cleanSelectedItem(item, index));
+}
+
+export function applyCandidateSelection(candidatePool = [], candidateId, selected) {
+  if (!Array.isArray(candidatePool)) {
+    return [];
+  }
+
+  const targetItem = candidatePool.find((item) => item?.itemId === candidateId);
+
+  if (!targetItem) {
+    return candidatePool.map((item) => ({ ...item }));
+  }
+
+  if (!hasGroupId(targetItem)) {
+    return candidatePool.map((item) =>
+      item?.itemId === candidateId ? { ...item, selected } : { ...item },
+    );
+  }
+
+  const groupId = targetItem.groupId.trim();
+
+  return candidatePool.map((item) =>
+    hasGroupId(item) && item.groupId.trim() === groupId
+      ? { ...item, selected }
+      : { ...item },
+  );
 }
 
 export function summarizeCandidateSelection({

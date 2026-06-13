@@ -113,6 +113,58 @@ describe("summarizeSections", () => {
     expect(result.sectionSummaries[0].issues[0]).toContain("預計題數");
   });
 
+  it("題組大題納入配分加總與目標覆蓋計算", () => {
+    const result = summarizeSections({
+      sections: [
+        section("S1", ["1-1-1", "1-1-2"], {
+          kind: "group",
+          questionType: "題組",
+          textMode: "ai",
+          subCount: 3,
+          plannedCount: 3,
+        }),
+        section("S2", ["2-1-1"], { questionType: "應用題" }),
+      ],
+      objectives,
+      allocations,
+    });
+
+    expect(result.allMatched).toBe(true);
+    expect(result.sectionSummaries[0]).toMatchObject({
+      kind: "group",
+      questionType: "題組",
+      score: 50,
+      subCount: 3,
+      status: "pass",
+    });
+    expect(result.objectiveSummaries.map((entry) => entry.covered)).toEqual([
+      true,
+      true,
+      true,
+    ]);
+  });
+
+  it("自行提供文本的題組缺文本時阻擋前進", () => {
+    const result = summarizeSections({
+      sections: [
+        section("S1", ["1-1-1", "1-1-2", "2-1-1"], {
+          kind: "group",
+          questionType: "題組",
+          textMode: "provided",
+          providedText: "",
+          subCount: 4,
+          plannedCount: 4,
+        }),
+      ],
+      objectives,
+      allocations,
+    });
+
+    expect(result.allMatched).toBe(false);
+    expect(result.invalidSectionIds).toEqual(["S1"]);
+    expect(result.sectionSummaries[0].issues[0]).toContain("自行提供文本");
+  });
+
   it("空大題陣列回傳錯誤", () => {
     const result = summarizeSections({ sections: [], objectives, allocations });
 
@@ -136,6 +188,27 @@ describe("summarizeSections", () => {
       { sectionId: "S1", objectiveId: "1-1-2", questionTypes: ["選擇題"] },
       { sectionId: "S2", objectiveId: "2-1-1", questionTypes: ["應用題"] },
     ]);
+    expect(blueprint.reduce((sum, entry) => sum + entry.plannedScore, 0)).toBe(100);
+  });
+
+  it("buildBlueprintFromSections 對題組大題產生題組題型與小題數", () => {
+    const summary = summarizeSections({
+      sections: [
+        section("S1", ["1-1-1", "1-1-2", "2-1-1"], {
+          kind: "group",
+          questionType: "題組",
+          subCount: 4,
+          plannedCount: 4,
+        }),
+      ],
+      objectives,
+      allocations,
+    });
+    const blueprint = buildBlueprintFromSections(summary);
+
+    expect(blueprint).toHaveLength(3);
+    expect(blueprint.every((entry) => entry.questionTypes[0] === "題組")).toBe(true);
+    expect(blueprint.every((entry) => entry.plannedCount === 4)).toBe(true);
     expect(blueprint.reduce((sum, entry) => sum + entry.plannedScore, 0)).toBe(100);
   });
 });

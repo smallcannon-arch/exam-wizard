@@ -159,6 +159,7 @@ function assignGroupItems({ items, itemIdToDisplayNumber, itemIdToReviewNumber, 
       const group = {
         groupId,
         groupNumber: groups.length + 1,
+        stimulusTitle: item.stimulusTitle ?? "",
         stimulus: item.stimulus ?? "",
         items: [],
       };

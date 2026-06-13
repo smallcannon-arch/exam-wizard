@@ -6,6 +6,7 @@ import { validateItem, validateObjective } from "../core/schemas.js";
 import { isApiAvailable } from "./apiConfig.js";
 import {
   extractObjectivesViaApi,
+  generateGroupViaApi,
   generateItemsViaApi,
   suggestTypesViaApi,
 } from "./apiClient.js";
@@ -16,7 +17,10 @@ import { groupItemsByGroup } from "./groupItemsByGroup.js";
 import { groupObjectivesToUnits } from "./groupObjectivesToUnits.js";
 import { parseObjectivesTsv } from "./parseObjectivesTsv.js";
 import { renumberObjectives } from "./renumberObjectives.js";
-import { summarizeCandidateSelection } from "./selectItemsFromCandidates.js";
+import {
+  applyCandidateSelection,
+  summarizeCandidateSelection,
+} from "./selectItemsFromCandidates.js";
 import { summarizeBlueprint } from "./summarizeBlueprint.js";
 import {
   buildBlueprintFromSections,
@@ -965,16 +969,47 @@ function renderBlueprintStep() {
             </div>
             <div class="form-grid">
               <label>
+                <span>大題類型</span>
+                <select data-section-field="kind" data-section-id="${escapeHtml(section.sectionId)}">
+                  <option value="normal" ${section.kind === "normal" ? "selected" : ""}>一般大題</option>
+                  <option value="group" ${section.kind === "group" ? "selected" : ""}>題組大題</option>
+                </select>
+              </label>
+              ${section.kind === "group" ? `
+                <label>
+                  <span>文本來源</span>
+                  <select data-section-field="textMode" data-section-id="${escapeHtml(section.sectionId)}">
+                    <option value="ai" ${section.textMode !== "provided" ? "selected" : ""}>AI 生成文本</option>
+                    <option value="provided" ${section.textMode === "provided" ? "selected" : ""}>自行提供文本</option>
+                  </select>
+                </label>
+                <label>
+                  <span>小題數</span>
+                  <input type="number" min="1" max="8" step="1" data-section-field="subCount" data-section-id="${escapeHtml(section.sectionId)}" value="${escapeHtml(section.subCount ?? section.plannedCount)}">
+                </label>
+                ${section.textMode === "provided" ? `
+                  <label class="form-grid__wide">
+                    <span>自行提供文本</span>
+                    <textarea rows="5" data-section-field="providedText" data-section-id="${escapeHtml(section.sectionId)}" placeholder="請貼入要作為題組載體的文本，系統只依此文本生成小題，不改寫文本。">${escapeHtml(section.providedText ?? "")}</textarea>
+                  </label>
+                ` : `
+                  <label class="form-grid__wide">
+                    <span>主題方向（選填）</span>
+                    <input type="text" data-section-field="topicHint" data-section-id="${escapeHtml(section.sectionId)}" value="${escapeHtml(section.topicHint ?? "")}" placeholder="例：動物夜間活動觀察紀錄、星空觀測資料表">
+                  </label>
+                `}
+              ` : `
+              <label>
                 <span>題型</span>
                 <select data-section-field="questionType" data-section-id="${escapeHtml(section.sectionId)}">
                   ${QUESTION_TYPES.map((questionType) => `<option value="${escapeHtml(questionType)}" ${section.questionType === questionType ? "selected" : ""}>${escapeHtml(questionType)}</option>`).join("")}
-                  <option disabled>題組（即將推出）</option>
                 </select>
               </label>
               <label>
                 <span>預計題數</span>
                 <input type="number" min="1" step="1" data-section-field="plannedCount" data-section-id="${escapeHtml(section.sectionId)}" value="${escapeHtml(section.plannedCount)}">
               </label>
+              `}
             </div>
             <div class="objective-assignment">
               <h4>歸入此大題的學習目標</h4>
@@ -1005,7 +1040,7 @@ function renderBlueprintStep() {
 }
 
 function getSectionDisplayTitle(section, index) {
-  return `${SECTION_NUMERALS[index] ?? index + 1}、${section?.questionType || "選擇題"}`;
+  return `${SECTION_NUMERALS[index] ?? index + 1}、${section?.kind === "group" ? "題組" : section?.questionType || "選擇題"}`;
 }
 
 function getSectionsWithDisplayTitles() {
@@ -1050,9 +1085,9 @@ function renderSectionOverview(summary) {
                 ${summary.sectionSummaries.map((section) => `
                   <tr>
                     <td>${escapeHtml(section.title)}</td>
-                    <td>${escapeHtml(section.questionType)}</td>
+                    <td>${escapeHtml(section.kind === "group" ? "題組" : section.questionType)}</td>
                     <td>${section.objectiveIds.length > 0 ? escapeHtml(section.objectiveIds.join("、")) : "尚未指派"}</td>
-                    <td class="print-number">${escapeHtml(section.plannedCount)}</td>
+                    <td class="print-number">${escapeHtml(section.kind === "group" ? section.subCount : section.plannedCount)}</td>
                     <td class="print-number">${escapeHtml(formatPrintScore(section.score))}</td>
                     <td class="print-number">${escapeHtml(formatPercent(section.ratio))}</td>
                   </tr>
@@ -1210,6 +1245,68 @@ function renderCandidateOption(item) {
   `;
 }
 
+function renderGroupCandidateCard(groupItems) {
+  const firstItem = groupItems[0] ?? {};
+  const isSelected = groupItems.every((item) => item.selected === true);
+  const totalScore = groupItems.reduce((sum, item) => sum + (Number(item.score) || 0), 0);
+  const cognitiveLevels = [...new Set(
+    groupItems
+      .map((item) => item.cognitiveLevel)
+      .filter((level) => typeof level === "string" && level.trim() !== ""),
+  )];
+
+  return `
+    <article class="candidate-card candidate-card--group ${isSelected ? "candidate-card--selected" : ""}">
+      <label class="candidate-select">
+        <input
+          type="checkbox"
+          data-action="toggle-candidate-selection"
+          data-candidate-id="${escapeHtml(firstItem.itemId)}"
+          ${isSelected ? "checked" : ""}
+        >
+        <span>整組選入試卷</span>
+      </label>
+      <p><strong>題組</strong>｜${groupItems.length} 小題｜${escapeHtml(formatPrintScore(totalScore))} 分</p>
+      ${firstItem.stimulus ? `<div class="stimulus">${escapeHtml(firstItem.stimulus)}</div>` : ""}
+      ${cognitiveLevels.length > 0 ? `<p class="hint-text">認知層次：${escapeHtml(cognitiveLevels.join("、"))}</p>` : ""}
+      <ol class="candidate-subitems">
+        ${groupItems.map((item) => `
+          <li>
+            <strong>${escapeHtml(item.questionType || "小題")}</strong>
+            ${escapeHtml(item.question || "未填題幹")}
+            <span class="hint-text">（${escapeHtml(formatPrintScore(item.score))} 分｜目標：${escapeHtml((item.objectiveIds ?? []).join("、"))}${item.cognitiveLevel ? `｜${escapeHtml(item.cognitiveLevel)}` : ""}）</span>
+          </li>
+        `).join("")}
+      </ol>
+    </article>
+  `;
+}
+
+function renderGroupCandidates(candidates) {
+  const groups = [];
+  const groupMap = new Map();
+
+  candidates.forEach((item) => {
+    const groupId = typeof item.groupId === "string" && item.groupId.trim() !== ""
+      ? item.groupId.trim()
+      : item.itemId;
+
+    if (!groupMap.has(groupId)) {
+      const entries = [];
+      groupMap.set(groupId, entries);
+      groups.push(entries);
+    }
+
+    groupMap.get(groupId).push(item);
+  });
+
+  return `
+    <div class="candidate-list">
+      ${groups.map(renderGroupCandidateCard).join("")}
+    </div>
+  `;
+}
+
 function renderCandidatesByType(candidates) {
   const grouped = new Map();
 
@@ -1309,7 +1406,7 @@ function renderSelectionStep() {
               已選 ${selectedCandidates.length} 題／預計 ${escapeHtml(section.plannedCount)} 題，已選配分 ${formatPrintScore(selectedScore)} 分
             </p>
             <p class="hint-text">涵蓋目標：${escapeHtml((section.objectiveIds ?? []).join("、"))}</p>
-            ${candidates.length > 0 ? renderCandidatesByType(candidates) : `<p class="field-error">此大題目前沒有備選題，請回步驟 5 重新生成或改用手動出題。</p>`}
+            ${candidates.length > 0 ? (section.kind === "group" ? renderGroupCandidates(candidates) : renderCandidatesByType(candidates)) : `<p class="field-error">此大題目前沒有備選題，請回步驟 5 重新生成或改用手動出題。</p>`}
           </section>
         `;
       }).join("")}
@@ -1872,6 +1969,7 @@ function renderTeacherNote(item) {
       <span>【答案】${escapeHtml(item.answer ?? "")}</span>
       <span>【解析】${escapeHtml(item.explanation ?? "")}</span>
       <span>【對應目標：${escapeHtml((item.objectiveIds ?? []).join("、"))}】</span>
+      ${item.cognitiveLevel ? `<span>【認知層次】${escapeHtml(item.cognitiveLevel)}</span>` : ""}
       <span>【配分】${escapeHtml(item.score ?? "")} 分</span>
     </div>
   `;
@@ -1892,7 +1990,7 @@ function renderPrintItem(entry, { teacher }) {
 function renderPrintGroup(group, { teacher }) {
   return `
     <section class="print-group">
-      <h3>題組 ${escapeHtml(group.groupNumber)}</h3>
+      <h3>${escapeHtml(group.stimulusTitle || `題組 ${group.groupNumber}`)}</h3>
       ${group.stimulus ? `<div class="print-stimulus">${escapeHtml(group.stimulus)}</div>` : ""}
       ${group.items.map((entry) => renderPrintItem(entry, { teacher })).join("")}
     </section>
@@ -2697,6 +2795,95 @@ async function handleGenerateItemsViaApiLegacy() {
   }
 }
 
+function getObjectivesForSection(section) {
+  const objectiveIds = new Set(section.objectiveIds ?? []);
+
+  return state.objectives.filter((objective) => objectiveIds.has(objective.objectiveId));
+}
+
+function getPlannedScoreByObjectiveForSection(blueprint, sectionId) {
+  const map = new Map();
+
+  blueprint
+    .filter((entry) => entry.sectionId === sectionId)
+    .forEach((entry) => {
+      map.set(
+        entry.objectiveId,
+        (map.get(entry.objectiveId) ?? 0) + (Number(entry.plannedScore) || 0),
+      );
+    });
+
+  return map;
+}
+
+function normalizeGroupSubItemsForSection(group, section) {
+  const allowedObjectiveIds = section.objectiveIds ?? [];
+
+  return group.subItems.map((subItem, index) => {
+    const objectiveId = allowedObjectiveIds.includes(subItem.objectiveId)
+      ? subItem.objectiveId
+      : allowedObjectiveIds[index % Math.max(allowedObjectiveIds.length, 1)] ?? "";
+
+    return {
+      ...subItem,
+      objectiveId,
+      cognitiveLevel: ["提取", "推論", "整合", "評估"].includes(subItem.cognitiveLevel)
+        ? subItem.cognitiveLevel
+        : ["提取", "推論", "整合", "評估"][index % 4],
+    };
+  });
+}
+
+function convertGeneratedGroupToItems({
+  group,
+  section,
+  generationBlueprint,
+  groupIndex,
+}) {
+  const subItems = normalizeGroupSubItemsForSection(group, section);
+  const plannedScoreByObjective = getPlannedScoreByObjectiveForSection(
+    generationBlueprint,
+    section.sectionId,
+  );
+  const countByObjective = new Map();
+
+  subItems.forEach((subItem) => {
+    countByObjective.set(
+      subItem.objectiveId,
+      (countByObjective.get(subItem.objectiveId) ?? 0) + 1,
+    );
+  });
+
+  const groupId = `G-${String(groupIndex + 1).padStart(2, "0")}-${section.sectionId}`;
+  const stimulus = group.stimulus ?? "";
+
+  return subItems.map((subItem, index) => {
+    const targetScore = plannedScoreByObjective.get(subItem.objectiveId) ?? 0;
+    const count = countByObjective.get(subItem.objectiveId) ?? 1;
+
+    return {
+      itemId: `${groupId}-${index + 1}`,
+      groupId,
+      sectionId: section.sectionId,
+      questionType: subItem.questionType || "選擇題",
+      competencyType: "素養題組",
+      stimulus,
+      stimulusTitle: group.stimulusTitle ?? "",
+      question: subItem.question ?? "",
+      options: Array.isArray(subItem.options) ? subItem.options : [],
+      answer: subItem.answer ?? "",
+      explanation: subItem.explanation ?? "",
+      objectiveIds: subItem.objectiveId ? [subItem.objectiveId] : [],
+      score: targetScore / count,
+      estimatedTimeSeconds: 90,
+      discriminationPrediction: 0.3,
+      chineseDimension: null,
+      cognitiveLevel: subItem.cognitiveLevel,
+      reviewFlags: [],
+    };
+  });
+}
+
 async function handleGenerateItemsViaApi() {
   if (state.apiBusy) {
     return;
@@ -2735,9 +2922,58 @@ async function handleGenerateItemsViaApi() {
 
   const successfulBatchResults = [];
   const totalBatches = batchPlan.batches.length;
+  const groupSections = sectionSummary.sectionSummaries.filter(
+    (section) => section.kind === "group",
+  );
+  const totalWorkCount = totalBatches + groupSections.length;
+  let workIndex = 0;
+
+  for (const [groupIndex, section] of groupSections.entries()) {
+    generationApiProgress = `正在生成第 ${workIndex + 1}／共 ${totalWorkCount} 批（題組：${section.title}）`;
+    render();
+
+    const result = await generateGroupViaApi({
+      project: state.project,
+      textMode: section.textMode,
+      providedText: section.providedText,
+      topicHint: section.topicHint,
+      objectives: getObjectivesForSection(section),
+      subCount: section.subCount,
+    });
+
+    if (!result.ok) {
+      const partialMerge = mergeItemBatches(successfulBatchResults);
+      const completedItems = partialMerge.ok ? partialMerge.items : [];
+
+      if (completedItems.length > 0) {
+        state = applyAction(state, {
+          type: "SET_CANDIDATE_POOL",
+          payload: completedItems,
+          updatedAt: new Date().toISOString(),
+        });
+        saveState();
+      }
+
+      generationApiError = `題組「${section.title}」生成失敗：${result.error}。已完成 ${completedItems.length} 題，可重試或改用手動補齊。`;
+      generationApiProgress = "";
+      setApiBusy(false);
+      render();
+      return;
+    }
+
+    successfulBatchResults.push({
+      items: convertGeneratedGroupToItems({
+        group: result.group,
+        section,
+        generationBlueprint,
+        groupIndex,
+      }),
+    });
+    workIndex += 1;
+  }
 
   for (const [index, batch] of batchPlan.batches.entries()) {
-    generationApiProgress = `正在生成第 ${index + 1}／共 ${totalBatches} 批（大題：${batch.sectionTitle || batch.unitName}）`;
+    generationApiProgress = `正在生成第 ${workIndex + 1}／共 ${totalWorkCount} 批（大題：${batch.sectionTitle || batch.unitName}）`;
     render();
 
     const result = await generateItemsViaApi({
@@ -2775,6 +3011,7 @@ async function handleGenerateItemsViaApi() {
         sectionId: batch.sectionId,
       })),
     });
+    workIndex += 1;
   }
 
   const merged = mergeItemBatches(successfulBatchResults);
@@ -2810,9 +3047,7 @@ async function handleGenerateItemsViaApi() {
 }
 
 function handleToggleCandidateSelection(candidateId, selected) {
-  const nextPool = state.candidatePool.map((item) =>
-    item.itemId === candidateId ? { ...item, selected } : item,
-  );
+  const nextPool = applyCandidateSelection(state.candidatePool, candidateId, selected);
 
   dispatch({
     type: "SET_CANDIDATE_POOL",
@@ -3354,19 +3589,40 @@ function handleInput(event) {
 
   if (sectionField) {
     const field = sectionField.dataset.sectionField;
-    const value = field === "plannedCount" ? Number(sectionField.value) : sectionField.value;
+    const numericFields = new Set(["plannedCount", "subCount"]);
+    const value = numericFields.has(field) ? Number(sectionField.value) : sectionField.value;
+    const payload = {
+      sectionId: sectionField.dataset.sectionId,
+      [field]: value,
+    };
+
+    if (field === "kind" && value === "group") {
+      payload.questionType = "題組";
+      payload.subCount = 3;
+      payload.plannedCount = 3;
+    }
+
+    if (field === "kind" && value === "normal") {
+      payload.questionType = "選擇題";
+      payload.textMode = "ai";
+    }
+
+    if (field === "subCount") {
+      payload.plannedCount = value;
+    }
+
     const action = {
       type: "UPDATE_SECTION",
-      payload: {
-        sectionId: sectionField.dataset.sectionId,
-        [field]: value,
-      },
+      payload,
       updatedAt: new Date().toISOString(),
     };
 
     showBlueprintErrors = false;
 
-    if (field === "plannedCount" && event.type === "input") {
+    if (
+      ["plannedCount", "subCount", "providedText", "topicHint"].includes(field) &&
+      event.type === "input"
+    ) {
       state = applyAction(state, action);
       saveState();
       return;
