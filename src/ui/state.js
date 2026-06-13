@@ -1,14 +1,20 @@
 import { renumberObjectives } from "./renumberObjectives.js";
 
+const MIN_STEP = 1;
+const MAX_STEP = 8;
+
 export function createInitialState() {
   return {
     currentStep: 1,
     project: null,
     objectives: [],
     allocations: [],
+    typePlanMode: null,
     blueprint: [],
     materialText: "",
     promptGeneratedAt: null,
+    candidatePool: [],
+    candidatesPerObjective: 3,
     items: [],
     auditReport: null,
     auditStale: false,
@@ -19,6 +25,15 @@ export function createInitialState() {
 
 function cloneArrayPayload(payload) {
   return Array.isArray(payload) ? [...payload] : [];
+}
+
+function normalizeTypePlanMode(payload) {
+  return payload === "ai" || payload === "manual" ? payload : null;
+}
+
+function normalizeCandidatesPerObjective(payload) {
+  const value = Number(payload);
+  return Number.isInteger(value) && value > 0 ? value : 3;
 }
 
 function withUpdatedAt(state, action) {
@@ -67,8 +82,13 @@ export function applyAction(state, action) {
           ...currentState,
           objectives: cloneArrayPayload(currentAction.payload),
           allocations: [],
+          typePlanMode: null,
           blueprint: [],
           promptGeneratedAt: null,
+          candidatePool: [],
+          items: [],
+          auditReport: null,
+          auditStale: false,
         },
         currentAction,
       );
@@ -80,12 +100,24 @@ export function applyAction(state, action) {
         },
         currentAction,
       );
+    case "SET_TYPE_PLAN_MODE":
+      return withUpdatedAt(
+        {
+          ...currentState,
+          typePlanMode: normalizeTypePlanMode(currentAction.payload),
+        },
+        currentAction,
+      );
     case "SET_BLUEPRINT":
       return withUpdatedAt(
         {
           ...currentState,
           blueprint: cloneArrayPayload(currentAction.payload),
           promptGeneratedAt: null,
+          candidatePool: [],
+          items: [],
+          auditReport: null,
+          auditStale: false,
         },
         currentAction,
       );
@@ -104,6 +136,22 @@ export function applyAction(state, action) {
           ...currentState,
           promptGeneratedAt:
             typeof currentAction.payload === "string" ? currentAction.payload : null,
+        },
+        currentAction,
+      );
+    case "SET_CANDIDATE_POOL":
+      return withUpdatedAt(
+        {
+          ...currentState,
+          candidatePool: cloneArrayPayload(currentAction.payload),
+        },
+        currentAction,
+      );
+    case "SET_CANDIDATES_PER_OBJECTIVE":
+      return withUpdatedAt(
+        {
+          ...currentState,
+          candidatesPerObjective: normalizeCandidatesPerObjective(currentAction.payload),
         },
         currentAction,
       );
@@ -152,6 +200,7 @@ export function applyAction(state, action) {
           ...currentState,
           objectives: cloneArrayPayload(result.objectives),
           blueprint: remapBlueprintObjectiveIds(currentState.blueprint, mapping),
+          candidatePool: remapItemObjectiveIds(currentState.candidatePool, mapping),
           items: remapItemObjectiveIds(currentState.items, mapping),
           auditStale:
             currentState.auditReport !== null ? true : currentState.auditStale,
@@ -166,7 +215,7 @@ export function applyAction(state, action) {
         {
           ...currentState,
           currentStep: Number.isInteger(stepNumber)
-            ? Math.min(Math.max(stepNumber, 1), 7)
+            ? Math.min(Math.max(stepNumber, MIN_STEP), MAX_STEP)
             : currentState.currentStep,
         },
         currentAction,
@@ -188,8 +237,8 @@ function isValidState(value) {
     value !== null &&
     typeof value === "object" &&
     Number.isInteger(value.currentStep) &&
-    value.currentStep >= 1 &&
-    value.currentStep <= 7 &&
+    value.currentStep >= MIN_STEP &&
+    value.currentStep <= MAX_STEP &&
     Object.prototype.hasOwnProperty.call(value, "project") &&
     Array.isArray(value.objectives) &&
     Array.isArray(value.allocations) &&
@@ -207,7 +256,7 @@ export function deserializeState(json) {
     if (!isValidState(parsed)) {
       return {
         state: createInitialState(),
-        warning: "草稿資料格式不完整，已改用初始狀態。",
+        warning: "草稿資料格式不完整，已改用新的空白草稿。",
       };
     }
 
@@ -217,6 +266,7 @@ export function deserializeState(json) {
         ...parsed,
         objectives: [...parsed.objectives],
         allocations: [...parsed.allocations],
+        typePlanMode: normalizeTypePlanMode(parsed.typePlanMode),
         blueprint: [...parsed.blueprint],
         materialText:
           typeof parsed.materialText === "string" ? parsed.materialText : "",
@@ -224,6 +274,12 @@ export function deserializeState(json) {
           typeof parsed.promptGeneratedAt === "string"
             ? parsed.promptGeneratedAt
             : null,
+        candidatePool: Array.isArray(parsed.candidatePool)
+          ? [...parsed.candidatePool]
+          : [],
+        candidatesPerObjective: normalizeCandidatesPerObjective(
+          parsed.candidatesPerObjective,
+        ),
         items: [...parsed.items],
         auditStale: parsed.auditStale === true,
         apiBusy: parsed.apiBusy === true,
@@ -233,7 +289,7 @@ export function deserializeState(json) {
   } catch {
     return {
       state: createInitialState(),
-      warning: "草稿資料無法解析，已改用初始狀態。",
+      warning: "草稿資料無法讀取，已改用新的空白草稿。",
     };
   }
 }

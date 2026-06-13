@@ -376,6 +376,36 @@ textarea:focus-visible {
   margin: 0 0 8px;
 }
 
+.mode-selector {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 16px;
+}
+
+.mode-card {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mode-card--selected {
+  border-color: var(--color-primary);
+  outline: 2px solid rgba(30, 58, 95, 0.18);
+}
+
+.mode-card span {
+  font-size: 0.92rem;
+  color: #555;
+}
+
 .hint-text {
   color: #555;
   margin: 0 0 12px;
@@ -1024,6 +1054,10 @@ textarea:focus-visible {
   }
 
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mode-selector {
     grid-template-columns: 1fr;
   }
 

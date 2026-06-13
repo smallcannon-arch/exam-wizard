@@ -7,6 +7,7 @@ import { isApiAvailable } from "./apiConfig.js";
 import { extractObjectivesViaApi, generateItemsViaApi } from "./apiClient.js";
 import { buildPrintData } from "./buildPrintData.js";
 import { replaceFieldLabels } from "./fieldLabels.js";
+import { mergeItemBatches, planItemBatches } from "./generateItemsBatched.js";
 import { groupItemsByGroup } from "./groupItemsByGroup.js";
 import { groupObjectivesToUnits } from "./groupObjectivesToUnits.js";
 import { parseObjectivesTsv } from "./parseObjectivesTsv.js";
@@ -75,6 +76,7 @@ let copyStatus = "";
 let extractionCopyStatus = "";
 let generationApiError = "";
 let generationApiSuccess = "";
+let generationApiProgress = "";
 let itemsJsonText = "";
 let itemImportMessage = "";
 let itemImportErrors = [];
@@ -865,14 +867,49 @@ function renderUnitSummary(summary) {
   `;
 }
 
+function renderTypePlanModeSelector() {
+  const selectedMode = state.typePlanMode ?? "ai";
+
+  return `
+    <section class="mode-selector" aria-label="題型規劃模式">
+      <button
+        class="mode-card ${selectedMode === "ai" ? "mode-card--selected" : ""}"
+        type="button"
+        data-action="set-type-plan-mode"
+        data-mode="ai"
+      >
+        <strong>AI 分析題型</strong>
+        <span>推薦模式。AI 題型分析即將推出，請暫用自行指定。</span>
+      </button>
+      <button
+        class="mode-card ${selectedMode === "manual" ? "mode-card--selected" : ""}"
+        type="button"
+        data-action="set-type-plan-mode"
+        data-mode="manual"
+      >
+        <strong>自行指定題型</strong>
+        <span>逐目標勾選題型並填入本目標總配分。</span>
+      </button>
+    </section>
+    ${
+      selectedMode === "ai"
+        ? `<p class="notice notice--inline">AI 題型分析即將推出，請先選「自行指定題型」完成本步驟。</p>`
+        : ""
+    }
+  `;
+}
+
 function renderBlueprintStep() {
   const rows = getBlueprintRows();
   const summary = summarizeBlueprint(state.allocations, normalizeBlueprintForSubmit(rows));
   const rowsByObjectiveId = new Map(rows.map((row, index) => [row.objectiveId, { row, index }]));
+  const selectedMode = state.typePlanMode ?? "ai";
+  const canProceed = selectedMode === "manual" && summary.allMatched;
 
   return `
     <section class="step-panel" aria-labelledby="current-step-title">
-      <h2 id="current-step-title">④命題藍圖</h2>
+      <h2 id="current-step-title">④題型規劃</h2>
+      ${renderTypePlanModeSelector()}
       ${summary.errors.length > 0 ? `<ul class="row-errors">${summary.errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul>` : ""}
       ${state.allocations.map((allocation) => {
         const unitObjectives = state.objectives.filter(
@@ -940,7 +977,7 @@ function renderBlueprintStep() {
       }).join("")}
       <div class="step-actions">
         <button class="button button--secondary" type="button" data-action="go-step" data-target-step="3">上一步</button>
-        <button class="button" type="button" data-action="blueprint-next" ${summary.allMatched ? "" : "disabled"}>下一步</button>
+        <button class="button" type="button" data-action="blueprint-next" ${canProceed ? "" : "disabled"}>下一步</button>
       </div>
     </section>
   `;
@@ -988,26 +1025,27 @@ function renderPromptStep() {
 
   return `
     <section class="step-panel" aria-labelledby="current-step-title">
-      <h2 id="current-step-title">產生出題指令</h2>
+      <h2 id="current-step-title">⑤生成備選題</h2>
       <label class="prompt-material">
         <span>教材摘要（選填）</span>
         <textarea data-material-text rows="5" placeholder="可自行輸入課文重點；也可以把課本內容請 AI 整理成摘要後貼入。">${escapeHtml(state.materialText)}</textarea>
       </label>
       ${apiAvailable ? `
         <section class="api-mode-block">
-          <h3>一鍵生成題庫</h3>
+          <h3>一鍵生成備選題</h3>
           <p class="hint-text">按「生成題庫」，系統會依命題藍圖自動產生題目草稿，直接進入下一步檢核。AI 產出僅為草稿，務必逐題修改定稿。</p>
           ${generationApiError ? `<p class="field-error">${escapeHtml(generationApiError)} 可改用下方「手動出題指令」。</p>` : ""}
           ${generationApiSuccess ? `<p class="success-notice">${escapeHtml(generationApiSuccess)}</p>` : ""}
-          ${apiBusy ? `<p class="notice notice--inline">題目生成中，約需 10～30 秒…</p>` : ""}
+          ${generationApiProgress ? `<p class="notice notice--inline">${escapeHtml(generationApiProgress)}</p>` : ""}
+          ${apiBusy && !generationApiProgress ? `<p class="notice notice--inline">題目生成中，約需 10～30 秒…</p>` : ""}
           <div class="step-actions">
-            <button class="button" type="button" data-action="generate-items-api" ${apiBusy ? "disabled" : ""}>生成題庫</button>
+            <button class="button" type="button" data-action="generate-items-api" ${apiBusy ? "disabled" : ""}>生成備選題</button>
           </div>
         </section>
       ` : ""}
       <section class="api-mode-block">
         <h3>手動出題指令</h3>
-        <p class="hint-text">按「複製指令」，貼到 Gemini、ChatGPT、Claude 等 AI 工具送出；AI 回覆題庫資料後，請到步驟 6 整段貼入。</p>
+        <p class="hint-text">按「複製指令」，貼到 Gemini、ChatGPT、Claude 等 AI 工具送出；AI 回覆題庫資料後，請到步驟 7 整段貼入。</p>
         ${result.ok ? `
           <div class="prompt-toolbar">
             <button class="button" type="button" data-action="copy-prompt">複製指令</button>
@@ -1018,7 +1056,26 @@ function renderPromptStep() {
       </section>
       <div class="step-actions">
         <button class="button button--secondary" type="button" data-action="go-step" data-target-step="4">上一步</button>
-        <button class="button" type="button" data-action="prompt-next" ${result.ok ? "" : "disabled"}>前往步驟 6 手動貼入</button>
+        <button class="button" type="button" data-action="prompt-next" ${result.ok ? "" : "disabled"}>前往步驟 7 手動貼入</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderSelectionStep() {
+  const candidateCount = Array.isArray(state.candidatePool)
+    ? state.candidatePool.length
+    : 0;
+  const itemCount = Array.isArray(state.items) ? state.items.length : 0;
+
+  return `
+    <section class="step-panel" aria-labelledby="current-step-title">
+      <h2 id="current-step-title">⑥選題組卷</h2>
+      <p class="notice notice--inline">選題功能即將推出。本版先將步驟 5 生成的備選題全數帶入正式題庫。</p>
+      <p>目前已有 ${candidateCount} 題備選題，已帶入正式題庫 ${itemCount} 題。</p>
+      <div class="step-actions">
+        <button class="button button--secondary" type="button" data-action="go-step" data-target-step="5">上一步</button>
+        <button class="button" type="button" data-action="go-step" data-target-step="7" ${itemCount > 0 ? "" : "disabled"}>前往審題檢核</button>
       </div>
     </section>
   `;
@@ -1375,9 +1432,9 @@ function renderAuditReport() {
       </div>
       ${renderChecklistSuggestions(report)}
       ${report.overallSeverity === "warning" && !state.auditStale ? `<p class="text-warning">尚有警告事項，請確認後再輸出。</p>` : ""}
-      ${blockReason ? `<p class="text-error">無法進入步驟 7：${escapeHtml(blockReason)}</p>` : ""}
+      ${blockReason ? `<p class="text-error">無法進入步驟 8：${escapeHtml(blockReason)}</p>` : ""}
       <div class="step-actions">
-        <button class="button" type="button" data-action="go-step" data-target-step="7" ${blockReason ? "disabled" : ""}>前往步驟 7</button>
+        <button class="button" type="button" data-action="go-step" data-target-step="8" ${blockReason ? "disabled" : ""}>前往步驟 8</button>
       </div>
     </section>
   `;
@@ -1386,7 +1443,7 @@ function renderAuditReport() {
 function renderItemsStep() {
   return `
     <section class="step-panel" aria-labelledby="current-step-title">
-      <h2 id="current-step-title">⑥匯入題庫與檢核</h2>
+      <h2 id="current-step-title">⑦審題檢核</h2>
       <section class="paste-panel" aria-label="貼入題庫資料">
         <label>
           <span>題庫資料</span>
@@ -1406,7 +1463,7 @@ function renderItemsStep() {
       </section>
       ${renderAuditReport()}
       <div class="step-actions">
-        <button class="button button--secondary" type="button" data-action="go-step" data-target-step="5">上一步</button>
+        <button class="button button--secondary" type="button" data-action="go-step" data-target-step="6">上一步</button>
       </div>
     </section>
   `;
@@ -1427,7 +1484,7 @@ function renderPrintOutputStep() {
 
   return `
     <section class="step-panel" aria-labelledby="current-step-title">
-      <h2 id="current-step-title">七、輸出送審表件</h2>
+      <h2 id="current-step-title">⑧輸出送審表件</h2>
       ${hasReport ? `
         <div class="output-actions" aria-label="送審表件輸出">
           <button class="button" type="button" data-action="open-print-view" data-print-view="scoreTable">配分表</button>
@@ -1437,10 +1494,10 @@ function renderPrintOutputStep() {
         </div>
         <p class="empty-state">各視圖開啟後，可按右上角「列印／另存 PDF」輸出。簽名欄請保留紙本親簽。</p>
       ` : `
-        <p class="text-error">尚未完成審題檢核，請回步驟 6 執行檢核後再輸出送審表件。</p>
+        <p class="text-error">尚未完成審題檢核，請回步驟 7 執行檢核後再輸出送審表件。</p>
       `}
       <div class="step-actions">
-        <button class="button button--secondary" type="button" data-action="go-step" data-target-step="6">上一步</button>
+        <button class="button button--secondary" type="button" data-action="go-step" data-target-step="7">上一步</button>
       </div>
     </section>
   `;
@@ -1794,10 +1851,14 @@ function renderCurrentStep() {
   }
 
   if (state.currentStep === 6) {
-    return renderItemsStep();
+    return renderSelectionStep();
   }
 
   if (state.currentStep === 7) {
+    return renderItemsStep();
+  }
+
+  if (state.currentStep === 8) {
     return renderPrintOutputStep();
   }
 
@@ -1943,10 +2004,6 @@ function enterStep(stepNumber) {
     return;
   }
 
-  if (stepNumber === 5) {
-    markPromptGenerated();
-  }
-
   notice = "";
   dispatch({ type: "GO_TO_STEP", payload: stepNumber });
 }
@@ -2033,6 +2090,12 @@ function handleBlueprintNext() {
 
   showBlueprintErrors = true;
 
+  if ((state.typePlanMode ?? "ai") !== "manual") {
+    notice = "AI 題型分析即將推出，請先選「自行指定題型」完成本步驟。";
+    render();
+    return;
+  }
+
   if (!summary.allMatched) {
     const firstInvalidEntry = summary.invalidEntries[0];
     notice =
@@ -2053,7 +2116,6 @@ function handleBlueprintNext() {
   notice = "";
   dispatchMany([
     { type: "SET_BLUEPRINT", payload: rows },
-    { type: "SET_PROMPT_GENERATED_AT", payload: new Date().toISOString() },
     { type: "GO_TO_STEP", payload: 5 },
   ]);
 }
@@ -2165,7 +2227,7 @@ function handlePromptNext() {
 
   dispatchMany([
     { type: "SET_PROMPT_GENERATED_AT", payload: new Date().toISOString() },
-    { type: "GO_TO_STEP", payload: 6 },
+    { type: "GO_TO_STEP", payload: 7 },
   ]);
 }
 
@@ -2215,7 +2277,7 @@ async function handleStartApiExtraction() {
   });
 }
 
-async function handleGenerateItemsViaApi() {
+async function handleGenerateItemsViaApiLegacy() {
   if (state.apiBusy) {
     return;
   }
@@ -2265,6 +2327,106 @@ async function handleGenerateItemsViaApi() {
 
   if (invalidCount > 0) {
     notice = `已生成 ${result.items.length} 題，其中 ${invalidCount} 題需要修正。`;
+    render();
+  }
+}
+
+async function handleGenerateItemsViaApi() {
+  if (state.apiBusy) {
+    return;
+  }
+
+  const batchPlan = planItemBatches({
+    objectives: state.objectives,
+    blueprint: state.blueprint,
+    perObjective: 1,
+  });
+
+  if (!batchPlan.ok) {
+    generationApiError = formatUserFacingError(
+      batchPlan.errors[0] ?? "無法規劃生成批次，請先檢查題型規劃。",
+    );
+    render();
+    return;
+  }
+
+  generationApiError = "";
+  generationApiSuccess = "";
+  generationApiProgress = "";
+  setApiBusy(true);
+  render();
+
+  const successfulBatchResults = [];
+  const totalBatches = batchPlan.batches.length;
+
+  for (const [index, batch] of batchPlan.batches.entries()) {
+    generationApiProgress = `正在生成第 ${index + 1}／共 ${totalBatches} 批（單元：${batch.unitName}）`;
+    render();
+
+    const result = await generateItemsViaApi({
+      project: state.project,
+      objectives: batch.objectives,
+      blueprint: batch.blueprint,
+      materialText: state.materialText,
+      perObjective: batch.perObjective,
+      requestedItemCount: batch.requestedItemCount,
+    });
+
+    if (!result.ok) {
+      const partialMerge = mergeItemBatches(successfulBatchResults);
+      const completedItems = partialMerge.ok ? partialMerge.items : [];
+
+      if (completedItems.length > 0) {
+        state = applyAction(state, {
+          type: "SET_CANDIDATE_POOL",
+          payload: completedItems,
+          updatedAt: new Date().toISOString(),
+        });
+        state = applyAction(state, {
+          type: "SET_ITEMS",
+          payload: completedItems,
+          updatedAt: new Date().toISOString(),
+        });
+        saveState();
+      }
+
+      generationApiError = `第 ${index + 1} 批（單元：${batch.unitName}）失敗：${result.error}。已完成 ${completedItems.length} 題，可改用手動補齊。`;
+      generationApiProgress = "";
+      setApiBusy(false);
+      render();
+      return;
+    }
+
+    successfulBatchResults.push(result);
+  }
+
+  const merged = mergeItemBatches(successfulBatchResults);
+
+  if (!merged.ok) {
+    generationApiError = merged.errors[0] ?? "備選題合併失敗，請改用手動出題指令。";
+    generationApiProgress = "";
+    setApiBusy(false);
+    render();
+    return;
+  }
+
+  const validationErrors = getItemValidationErrors(merged.items);
+  const invalidCount = countInvalidItems(validationErrors);
+  itemImportMessage = `已生成 ${merged.items.length} 題，請至步驟 7 檢核與編修。`;
+  itemImportErrors = validationErrors.map(toTeacherFacingImportText);
+  generationApiSuccess = itemImportMessage;
+  generationApiProgress = "";
+  editingItemIndex = null;
+  itemEditErrors = [];
+  setApiBusy(false);
+  dispatchMany([
+    { type: "SET_CANDIDATE_POOL", payload: merged.items },
+    { type: "SET_ITEMS", payload: merged.items },
+    { type: "GO_TO_STEP", payload: 6 },
+  ]);
+
+  if (invalidCount > 0) {
+    notice = `已生成 ${merged.items.length} 題，其中 ${invalidCount} 題需要修正。`;
     render();
   }
 }
@@ -2591,6 +2753,14 @@ async function handleClick(event) {
 
   if (action === "allocations-next") {
     handleAllocationsNext();
+    return;
+  }
+
+  if (action === "set-type-plan-mode") {
+    dispatch({
+      type: "SET_TYPE_PLAN_MODE",
+      payload: actionButton.dataset.mode,
+    });
     return;
   }
 

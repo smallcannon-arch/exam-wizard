@@ -32,8 +32,16 @@ function hasPromptGenerated(state) {
   );
 }
 
+function hasCandidatePool(state) {
+  return Array.isArray(state?.candidatePool) && state.candidatePool.length > 0;
+}
+
 function hasItems(state) {
   return Array.isArray(state?.items) && state.items.length > 0;
+}
+
+function hasItemsOrManualPrompt(state) {
+  return hasItems(state) || hasPromptGenerated(state);
 }
 
 function hasAuditReport(state) {
@@ -49,9 +57,7 @@ function hasNonErrorAuditReport(state) {
 }
 
 const STEP_RULES = {
-  2: [
-    { ok: hasProject, reason: "請先完成步驟 1：建立試卷。" },
-  ],
+  2: [{ ok: hasProject, reason: "請先完成步驟 1：建立試卷。" }],
   3: [
     { ok: hasProject, reason: "請先完成步驟 1：建立試卷。" },
     { ok: hasObjectives, reason: "請先完成步驟 2：匯入學習目標。" },
@@ -65,24 +71,37 @@ const STEP_RULES = {
     { ok: hasProject, reason: "請先完成步驟 1：建立試卷。" },
     { ok: hasObjectives, reason: "請先完成步驟 2：匯入學習目標。" },
     { ok: hasAllocations, reason: "請先完成步驟 3：節數配分。" },
-    { ok: hasBlueprint, reason: "請先完成步驟 4：命題藍圖。" },
+    { ok: hasBlueprint, reason: "請先完成步驟 4：題型規劃。" },
   ],
   6: [
     { ok: hasProject, reason: "請先完成步驟 1：建立試卷。" },
     { ok: hasObjectives, reason: "請先完成步驟 2：匯入學習目標。" },
     { ok: hasAllocations, reason: "請先完成步驟 3：節數配分。" },
-    { ok: hasBlueprint, reason: "請先完成步驟 4：命題藍圖。" },
-    { ok: hasPromptGenerated, reason: "請先完成步驟 5：產生出題指令。" },
+    { ok: hasBlueprint, reason: "請先完成步驟 4：題型規劃。" },
+    { ok: hasCandidatePool, reason: "請先完成步驟 5：生成備選題。" },
   ],
   7: [
     { ok: hasProject, reason: "請先完成步驟 1：建立試卷。" },
     { ok: hasObjectives, reason: "請先完成步驟 2：匯入學習目標。" },
     { ok: hasAllocations, reason: "請先完成步驟 3：節數配分。" },
-    { ok: hasBlueprint, reason: "請先完成步驟 4：命題藍圖。" },
-    { ok: hasItems, reason: "請先完成步驟 6：匯入題庫與檢核。" },
-    { ok: hasAuditReport, reason: "請先完成題庫檢核並產生審題報告。" },
+    { ok: hasBlueprint, reason: "請先完成步驟 4：題型規劃。" },
+    {
+      ok: hasItemsOrManualPrompt,
+      reason: "請先完成步驟 6：選題組卷，或在步驟 5 產生手動出題指令。",
+    },
+  ],
+  8: [
+    { ok: hasProject, reason: "請先完成步驟 1：建立試卷。" },
+    { ok: hasObjectives, reason: "請先完成步驟 2：匯入學習目標。" },
+    { ok: hasAllocations, reason: "請先完成步驟 3：節數配分。" },
+    { ok: hasBlueprint, reason: "請先完成步驟 4：題型規劃。" },
+    { ok: hasItems, reason: "請先完成步驟 6：選題組卷。" },
+    { ok: hasAuditReport, reason: "請先在步驟 7 執行審題檢核。" },
     { ok: hasFreshAuditReport, reason: "題庫已變更，請重新檢核。" },
-    { ok: hasNonErrorAuditReport, reason: "審題報告仍有 error，請先修正題庫後重新檢核。" },
+    {
+      ok: hasNonErrorAuditReport,
+      reason: "審題結果仍有 error，請修正後重新檢核。",
+    },
   ],
 };
 
@@ -94,7 +113,7 @@ export function canEnterStep(state, stepNumber) {
     };
   }
 
-  if (!Number.isInteger(stepNumber) || stepNumber < 1 || stepNumber > 7) {
+  if (!Number.isInteger(stepNumber) || stepNumber < 1 || stepNumber > 8) {
     return {
       allowed: false,
       reason: "步驟編號不正確。",

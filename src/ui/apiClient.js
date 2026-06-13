@@ -3,7 +3,10 @@ import { API_BASE } from "./apiConfig.js";
 const DEFAULT_TIMEOUT_MS = 60000;
 const TIMEOUT_ERROR =
   "AI 服務回應逾時，請稍後再試，或改用下方手動貼回。";
-const GENERIC_ERROR = "AI 服務暫時無法使用，請稍後再試，或改用手動貼回。";
+const GENERIC_ERROR =
+  "AI 服務暫時無法使用，請稍後再試，或改用下方手動貼回。";
+const GENERATION_BUSY_ERROR =
+  "AI 生成超時或服務忙碌，已分批仍失敗，可改用手動出題指令。";
 
 function hasText(value) {
   return typeof value === "string" && value.trim() !== "";
@@ -18,6 +21,18 @@ function createError(message = GENERIC_ERROR) {
     ok: false,
     error: hasText(message) ? message : GENERIC_ERROR,
   };
+}
+
+function isUpstreamTimeout(raw) {
+  return isPlainObject(raw) && raw.code === "UPSTREAM_TIMEOUT";
+}
+
+function getHttpError(raw, kind, status) {
+  if (kind === "items" && (status === 502 || isUpstreamTimeout(raw))) {
+    return GENERATION_BUSY_ERROR;
+  }
+
+  return isPlainObject(raw) && hasText(raw.error) ? raw.error : GENERIC_ERROR;
 }
 
 function isValidObjective(objective) {
@@ -62,10 +77,14 @@ function isValidItem(item) {
 
 export function normalizeApiResult(raw, kind) {
   if (!isPlainObject(raw)) {
-    return createError("AI 回覆格式不完整，請改用手動貼回。");
+    return createError("AI 回覆格式不正確，請改用手動貼回。");
   }
 
   if (raw.ok !== true) {
+    if (kind === "items" && isUpstreamTimeout(raw)) {
+      return createError(GENERATION_BUSY_ERROR);
+    }
+
     return createError(raw.error);
   }
 
@@ -95,7 +114,7 @@ export function normalizeApiResult(raw, kind) {
 
   if (kind === "items") {
     if (!Array.isArray(raw.items)) {
-      return createError("AI 回覆缺少題庫清單，請改用手動貼回。");
+      return createError("AI 回覆缺少題目清單，請改用手動貼回。");
     }
 
     const invalidIndex = raw.items.findIndex((item) => !isValidItem(item));
@@ -112,7 +131,7 @@ export function normalizeApiResult(raw, kind) {
     };
   }
 
-  return createError("AI 回覆類型無法辨識，請改用手動貼回。");
+  return createError("AI 回覆類型不正確，請改用手動貼回。");
 }
 
 async function postApi(path, body, kind, timeoutMs = DEFAULT_TIMEOUT_MS) {
@@ -138,7 +157,7 @@ async function postApi(path, body, kind, timeoutMs = DEFAULT_TIMEOUT_MS) {
     }
 
     if (!response.ok) {
-      return createError(raw?.error);
+      return createError(getHttpError(raw, kind, response.status));
     }
 
     return normalizeApiResult(raw, kind);
@@ -169,6 +188,8 @@ export function generateItemsViaApi({
   objectives,
   blueprint,
   materialText,
+  perObjective = 1,
+  requestedItemCount = null,
 }) {
   return postApi(
     "/generate-items",
@@ -177,6 +198,8 @@ export function generateItemsViaApi({
       objectives,
       blueprint,
       materialText,
+      perObjective,
+      requestedItemCount,
     },
     "items",
   );
