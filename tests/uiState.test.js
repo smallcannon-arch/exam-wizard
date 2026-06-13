@@ -13,6 +13,7 @@ describe("ui state", () => {
       project: null,
       objectives: [],
       allocations: [],
+      objectiveAllocations: [],
       typePlanMode: null,
       sections: [],
       blueprint: [],
@@ -169,7 +170,7 @@ describe("ui state", () => {
     expect(idleState.updatedAt).toBe("2026-06-13T10:02:00+08:00");
   });
 
-  it("SET_CANDIDATES_PER_OBJECTIVE 僅接受 2 到 5 的整數", () => {
+  it("SET_CANDIDATES_PER_OBJECTIVE 僅接受 2 到 10 的整數", () => {
     expect(
       applyAction(createInitialState(), {
         type: "SET_CANDIDATES_PER_OBJECTIVE",
@@ -179,9 +180,9 @@ describe("ui state", () => {
     expect(
       applyAction(createInitialState(), {
         type: "SET_CANDIDATES_PER_OBJECTIVE",
-        payload: 5,
+        payload: 10,
       }).candidatesPerObjective,
-    ).toBe(5);
+    ).toBe(10);
     expect(
       applyAction(createInitialState(), {
         type: "SET_CANDIDATES_PER_OBJECTIVE",
@@ -191,9 +192,33 @@ describe("ui state", () => {
     expect(
       applyAction(createInitialState(), {
         type: "SET_CANDIDATES_PER_OBJECTIVE",
-        payload: 6,
+        payload: 11,
       }).candidatesPerObjective,
     ).toBe(3);
+  });
+
+  it("SET_OBJECTIVE_ALLOCATIONS 儲存目標配分並清除後續資料", () => {
+    const state = {
+      ...createInitialState(),
+      sections: [{ sectionId: "S-01" }],
+      blueprint: [{ objectiveId: "1-1-1" }],
+      candidatePool: [{ itemId: "C-01" }],
+      items: [{ itemId: "A-01" }],
+      auditReport: { overallSeverity: "pass" },
+    };
+    const result = applyAction(state, {
+      type: "SET_OBJECTIVE_ALLOCATIONS",
+      payload: [{ objectiveId: "1-1-1", actualScore: 20 }],
+    });
+
+    expect(result.objectiveAllocations).toEqual([
+      { objectiveId: "1-1-1", actualScore: 20 },
+    ]);
+    expect(result.sections).toEqual([]);
+    expect(result.blueprint).toEqual([]);
+    expect(result.candidatePool).toEqual([]);
+    expect(result.items).toEqual([]);
+    expect(result.auditReport).toBeNull();
   });
 
   it("SET_CANDIDATE_POOL 會清除舊正式題庫與審題報告", () => {

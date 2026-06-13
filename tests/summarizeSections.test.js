@@ -113,6 +113,22 @@ describe("summarizeSections", () => {
     expect(result.sectionSummaries[0].issues[0]).toContain("預計題數");
   });
 
+  it("有實際目標配分時會檢查目標配分是否能被規劃題數整除", () => {
+    const result = summarizeSections({
+      sections: [section("S1", ["1-1-1", "1-1-2", "2-1-1"], { plannedCount: 3 })],
+      objectives,
+      allocations,
+      objectiveAllocations: [
+        { objectiveId: "1-1-1", actualScore: 20 },
+        { objectiveId: "1-1-2", actualScore: 30 },
+        { objectiveId: "2-1-1", actualScore: 50 },
+      ],
+    });
+
+    expect(result.allMatched).toBe(false);
+    expect(result.errors.some((error) => error.includes("無法平分"))).toBe(true);
+  });
+
   it("題組大題納入配分加總與目標覆蓋計算", () => {
     const result = summarizeSections({
       sections: [

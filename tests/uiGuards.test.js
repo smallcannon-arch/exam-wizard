@@ -167,6 +167,19 @@ describe("ui guards", () => {
     });
   });
 
+  it("步驟 4 到 5 需目標實際配分合計與題數整除條件通過", () => {
+    const invalidScoreState = {
+      ...readyForStep4(),
+      objectiveAllocations: [{ objectiveId: "1-1-1", actualScore: 99 }],
+      sections: [validSection],
+    };
+
+    expect(canEnterStep(invalidScoreState, 5)).toEqual({
+      allowed: false,
+      reason: "請先完成步驟 4：卷結構規劃。",
+    });
+  });
+
   it("題組大題需完成文本來源、小題數與目標設定才可進入步驟 5", () => {
     const missingTextState = applyAction(readyForStep4(), {
       type: "SET_SECTIONS",

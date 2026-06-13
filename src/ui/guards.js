@@ -26,6 +26,7 @@ function hasSectionPlan(state) {
     sections: state.sections,
     objectives: state.objectives,
     allocations: state.allocations,
+    objectiveAllocations: state.objectiveAllocations,
   }).allMatched;
 }
 

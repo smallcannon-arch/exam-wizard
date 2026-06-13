@@ -1,4 +1,8 @@
 import { allocateScores } from "../core/allocateScores.js";
+import {
+  buildDefaultObjectiveAllocations,
+  validateAllocations,
+} from "./validateAllocations.js";
 
 const EPSILON = 1e-9;
 
@@ -16,8 +20,30 @@ function getTotalScore(allocations = []) {
   return Number.isInteger(total) && total > 0 ? total : 100;
 }
 
-function buildObjectiveScores(objectives = [], allocations = []) {
+function buildObjectiveScores(objectives = [], allocations = [], objectiveAllocations = []) {
   const totalScore = getTotalScore(allocations);
+  const effectiveObjectiveAllocations =
+    Array.isArray(objectiveAllocations) && objectiveAllocations.length > 0
+      ? objectiveAllocations
+      : buildDefaultObjectiveAllocations({ objectives, totalScore });
+  const allocationResult = validateAllocations({
+    objectives,
+    allocations: effectiveObjectiveAllocations,
+    totalScore,
+  });
+
+  if (allocationResult.ok || allocationResult.rows.length > 0) {
+    return {
+      ok: allocationResult.rows.length > 0,
+      objectiveScores: new Map(
+        allocationResult.rows.map((row) => [row.objectiveId, row.actualScore]),
+      ),
+      errors: allocationResult.errors,
+      totalScore,
+      allocationRows: allocationResult.rows,
+    };
+  }
+
   const units = objectives.map((objective) => ({
     id: objective.objectiveId,
     name: objective.objectiveId,
@@ -31,6 +57,7 @@ function buildObjectiveScores(objectives = [], allocations = []) {
       objectiveScores: new Map(),
       errors: result.errors,
       totalScore,
+      allocationRows: [],
     };
   }
 
@@ -44,6 +71,7 @@ function buildObjectiveScores(objectives = [], allocations = []) {
     ),
     errors: [],
     totalScore,
+    allocationRows: [],
   };
 }
 
@@ -92,16 +120,48 @@ function getCoverageCounts(sections = []) {
   return coverageCounts;
 }
 
+function getPlannedCounts(sections = []) {
+  const plannedCounts = new Map();
+
+  sections.forEach((section) => {
+    const count = section.kind === "group" ? section.subCount : section.plannedCount;
+
+    section.objectiveIds.forEach((objectiveId) => {
+      plannedCounts.set(objectiveId, (plannedCounts.get(objectiveId) ?? 0) + count);
+    });
+  });
+
+  return plannedCounts;
+}
+
 export function summarizeSections({
   sections = [],
   objectives = [],
   allocations = [],
+  objectiveAllocations = [],
 } = {}) {
   const safeObjectives = Array.isArray(objectives) ? objectives : [];
   const safeSections = Array.isArray(sections)
     ? sections.map(normalizeSection).sort((left, right) => left.order - right.order)
     : [];
-  const scoreResult = buildObjectiveScores(safeObjectives, allocations);
+  const plannedCounts = getPlannedCounts(safeSections);
+  const objectiveAllocationsWithPlannedCounts = (
+    Array.isArray(objectiveAllocations) ? objectiveAllocations : []
+  ).map((allocation) => {
+    const plannedCount = plannedCounts.get(String(allocation?.objectiveId ?? ""));
+
+    return plannedCount
+      ? {
+          ...allocation,
+          plannedCount,
+        }
+      : allocation;
+  });
+  const scoreResult = buildObjectiveScores(
+    safeObjectives,
+    allocations,
+    objectiveAllocationsWithPlannedCounts,
+  );
 
   if (!scoreResult.ok) {
     return {
@@ -126,6 +186,7 @@ export function summarizeSections({
     const objectiveId = objective.objectiveId;
     const score = scoreResult.objectiveScores.get(objectiveId) ?? 0;
     const coverageCount = coverageCounts.get(objectiveId) ?? 0;
+    const plannedCount = plannedCounts.get(objectiveId) ?? 0;
 
     return {
       objectiveId,
@@ -133,6 +194,7 @@ export function summarizeSections({
       lessonName: objective.lessonName,
       text: objective.text,
       score,
+      plannedCount,
       coverageCount,
       covered: coverageCount > 0,
     };
@@ -186,7 +248,7 @@ export function summarizeSections({
     0,
   );
   const coveredCount = objectiveSummaries.filter((objective) => objective.covered).length;
-  const errors = [];
+  const errors = [...scoreResult.errors];
 
   if (safeSections.length === 0) {
     errors.push("請至少新增一個大題。");

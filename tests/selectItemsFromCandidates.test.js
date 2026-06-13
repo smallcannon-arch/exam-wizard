@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyCandidateSelection,
   buildSelectedItemsFromCandidates,
+  computeSelectionScores,
   summarizeCandidateSelection,
 } from "../src/ui/selectItemsFromCandidates.js";
 
@@ -47,6 +48,18 @@ function candidate(itemId, objectiveIds, score, selected = false) {
 }
 
 describe("summarizeCandidateSelection", () => {
+  it("computeSelectionScores 可判斷整除與除不盡", () => {
+    expect(computeSelectionScores({ objectiveScore: 20, selectedCount: 4 })).toMatchObject({
+      ok: true,
+      perItemScore: 5,
+      selectedTotal: 20,
+    });
+    expect(computeSelectionScores({ objectiveScore: 20, selectedCount: 3 })).toMatchObject({
+      ok: false,
+      perItemScore: null,
+    });
+  });
+
   it("剛好選滿時 allMatched 為 true 並產出正式題目", () => {
     const result = summarizeCandidateSelection({
       objectives,
@@ -63,44 +76,46 @@ describe("summarizeCandidateSelection", () => {
     expect(result.totalSelectedScore).toBe(30);
   });
 
-  it("未選滿時回傳差額提示", () => {
+  it("未選題時回傳未完成提示", () => {
     const result = summarizeCandidateSelection({
       objectives,
       blueprint,
-      candidatePool: [candidate("C-01", ["1-1-1"], 10, true)],
+      candidatePool: [candidate("C-01", ["1-1-1"], 10, false)],
     });
 
     expect(result.allMatched).toBe(false);
     expect(result.objectiveSummaries[0]).toMatchObject({
       objectiveId: "1-1-1",
-      selectedScore: 10,
+      selectedCount: 0,
+      selectedScore: 0,
       expectedScore: 20,
-      status: "under",
+      status: "unselected",
     });
-    expect(result.errors[0]).toContain("還差 10 分");
+    expect(result.errors[0]).toContain("尚未選題");
   });
 
-  it("超選時回傳超選提示", () => {
+  it("選題數無法整除目標配分時回傳提示", () => {
     const result = summarizeCandidateSelection({
       objectives,
       blueprint,
       candidatePool: [
         candidate("C-01", ["1-1-1"], 20, true),
         candidate("C-02", ["1-1-1"], 5, true),
+        candidate("C-04", ["1-1-1"], 5, true),
         candidate("C-03", ["1-1-2"], 10, true),
       ],
     });
 
     expect(result.allMatched).toBe(false);
     expect(result.objectiveSummaries[0]).toMatchObject({
-      selectedScore: 25,
-      diff: 5,
-      status: "over",
+      selectedCount: 3,
+      selectedScore: 0,
+      status: "not_divisible",
     });
-    expect(result.errors[0]).toContain("超選 5 分");
+    expect(result.errors[0]).toContain("無法平分");
   });
 
-  it("跨目標題平均分攤配分", () => {
+  it("跨目標題依各目標每題分合併正式題分", () => {
     const result = summarizeCandidateSelection({
       objectives,
       blueprint,
@@ -116,6 +131,7 @@ describe("summarizeCandidateSelection", () => {
       20,
       10,
     ]);
+    expect(result.selectedItems.find((item) => item.question === "題目 C-02").score).toBe(15);
   });
 
   it("空備選池時回傳未完成", () => {

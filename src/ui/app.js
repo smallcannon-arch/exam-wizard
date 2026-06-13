@@ -2,7 +2,7 @@ import { allocateScores } from "../core/allocateScores.js";
 import { auditExam } from "../core/auditExam.js";
 import { buildObjectiveExtractionPrompt } from "../core/buildExtractionPrompt.js";
 import { buildItemGenerationPrompt, parseItemsJson } from "../core/buildPrompt.js";
-import { validateItem, validateObjective } from "../core/schemas.js";
+import { validateObjective } from "../core/schemas.js";
 import { isApiAvailable } from "./apiConfig.js";
 import {
   extractObjectivesViaApi,
@@ -27,6 +27,14 @@ import {
   summarizeSections,
 } from "./summarizeSections.js";
 import { getCanonicalSubjectLabel, isChineseSubject } from "./subjects.js";
+import {
+  buildDefaultObjectiveAllocations,
+  validateAllocations,
+} from "./validateAllocations.js";
+import {
+  normalizeItemsForAudit,
+  validateItemForUi,
+} from "./validateItemsForUi.js";
 import {
   applyAction,
   createInitialState,
@@ -525,9 +533,23 @@ function renderObjectivesStep() {
 }
 
 function getExtractionPromptResult() {
-  return buildObjectiveExtractionPrompt({
+  const result = buildObjectiveExtractionPrompt({
     project: state.project ?? {},
   });
+
+  if (!result.ok) {
+    return result;
+  }
+
+  return {
+    ok: true,
+    prompt: [
+      result.prompt,
+      "",
+      "補充提醒：可在 Claude / Gemini 等 AI 直接上傳課本或教案 PDF，貼上本指令擷取學習目標。",
+      "學習目標文字請照課本／教案原文逐字擷取，不得改寫、潤飾或自行歸納。",
+    ].join("\n"),
+  };
 }
 
 function renderAiExtractionPanelLegacy() {
@@ -570,24 +592,9 @@ function renderAiExtractionPanel() {
         <button class="icon-button" type="button" data-action="close-objective-dialog" aria-label="關閉">×</button>
       </header>
       <div class="modal-dialog__body">
-        ${apiAvailable ? `
-          <section class="api-mode-block">
-            <h4>一鍵擷取</h4>
-            <p class="hint-text">貼入教案或課文重點，按「開始擷取」，系統會自動整理出學習目標。擷取結果僅供參考，匯入後請逐筆核對。</p>
-            <label>
-              <span>教材文字</span>
-              <textarea data-extraction-material-text rows="8" placeholder="可貼入教案中的學習目標段落、課文重點或教師整理摘要。">${escapeHtml(extractionMaterialText)}</textarea>
-            </label>
-            ${extractionApiError ? `<p class="field-error">${escapeHtml(extractionApiError)} 可改用下方「手動貼回」。</p>` : ""}
-            ${apiBusy ? `<p class="notice notice--inline">擷取中，請稍候…</p>` : ""}
-            <div class="step-actions">
-              <button class="button" type="button" data-action="start-api-extraction" ${apiBusy ? "disabled" : ""}>開始擷取</button>
-            </div>
-          </section>
-        ` : ""}
-        <details class="manual-fallback" ${apiAvailable ? "" : "open"}>
-          <summary>或手動貼回</summary>
-          <p class="hint-text">若一鍵擷取暫時無法使用，可複製指令到外部 AI，再把回覆貼回匯入。</p>
+        <section class="api-mode-block">
+          <h4>手動擷取（可上傳 PDF）</h4>
+          <p class="hint-text">可在 Claude / Gemini 等 AI 直接上傳課本或教案 PDF，貼上本指令擷取學習目標。學習目標文字請照課本／教案原文逐字擷取，不得改寫、潤飾或自行歸納。</p>
           <ol class="instruction-list">
             <li>複製下方指令。</li>
             <li>開啟 Claude 或 Gemini，上傳教案 PDF 並貼上指令。</li>
@@ -610,7 +617,22 @@ function renderAiExtractionPanel() {
           <div class="step-actions">
             <button class="button" type="button" data-action="import-objectives">匯入</button>
           </div>
-        </details>
+        </section>
+        ${apiAvailable ? `
+          <details class="manual-fallback">
+            <summary>或：貼上純文字一鍵擷取（不支援 PDF）</summary>
+            <p class="hint-text">這條路徑只適合貼入純文字教案或課文重點；若資料在 PDF 中，請使用上方手動擷取流程。</p>
+            <label>
+              <span>教材文字</span>
+              <textarea data-extraction-material-text rows="8" placeholder="可貼入教案中的學習目標段落、課文重點或教師整理摘要。">${escapeHtml(extractionMaterialText)}</textarea>
+            </label>
+            ${extractionApiError ? `<p class="field-error">${escapeHtml(extractionApiError)} 可改用上方手動擷取。</p>` : ""}
+            ${apiBusy ? `<p class="notice notice--inline">擷取中，請稍候…</p>` : ""}
+            <div class="step-actions">
+              <button class="button" type="button" data-action="start-api-extraction" ${apiBusy ? "disabled" : ""}>開始擷取</button>
+            </div>
+          </details>
+        ` : ""}
       </div>
     </dialog>
   `;
@@ -703,6 +725,65 @@ function getAllocationPlan(objectives) {
   };
 }
 
+function getEffectiveObjectiveAllocations(objectives = state.objectives) {
+  const existingByObjectiveId = new Map(
+    state.objectiveAllocations.map((allocation) => [
+      allocation.objectiveId,
+      allocation,
+    ]),
+  );
+  const defaults = buildDefaultObjectiveAllocations({
+    objectives,
+    totalScore: 100,
+  });
+
+  return defaults.map((allocation) => {
+    const existing = existingByObjectiveId.get(allocation.objectiveId);
+
+    return {
+      ...allocation,
+      actualScore:
+        existing?.actualScore !== undefined
+          ? existing.actualScore
+          : allocation.actualScore,
+    };
+  });
+}
+
+function getObjectiveAllocationValidation(extraAllocations = null) {
+  return validateAllocations({
+    objectives: state.objectives,
+    allocations: extraAllocations ?? getEffectiveObjectiveAllocations(),
+    totalScore: 100,
+  });
+}
+
+function getActualUnitAllocations() {
+  const validation = getObjectiveAllocationValidation();
+  const unitMap = new Map();
+
+  state.objectives.forEach((objective) => {
+    const row = validation.rows.find(
+      (entry) => entry.objectiveId === objective.objectiveId,
+    );
+    const unitName = objective.unitName;
+    const entry =
+      unitMap.get(unitName) ??
+      {
+        id: unitName,
+        name: unitName,
+        periodCount: 0,
+        suggestedScore: 0,
+      };
+
+    entry.periodCount += Number(objective.periodCount) || 0;
+    entry.suggestedScore += Number(row?.actualScore) || 0;
+    unitMap.set(unitName, entry);
+  });
+
+  return [...unitMap.values()];
+}
+
 function formatFormula(unit, allocation, totalPeriods) {
   const rawScore = 100 * (unit.periodCount / totalPeriods);
 
@@ -716,11 +797,18 @@ function renderAllocationsStep() {
     (sum, allocation) => sum + allocation.suggestedScore,
     0,
   );
+  const objectiveAllocations = getEffectiveObjectiveAllocations();
+  const objectiveValidation = validateAllocations({
+    objectives: state.objectives,
+    allocations: objectiveAllocations,
+    totalScore: 100,
+  });
 
   return `
     <section class="step-panel" aria-labelledby="current-step-title">
       <h2 id="current-step-title">③節數配分</h2>
       ${allocationErrors.length > 0 ? `<ul class="row-errors">${allocationErrors.map((error) => `<li>${escapeHtml(formatUserFacingError(error))}</li>`).join("")}</ul>` : ""}
+      <p class="notice notice--inline">系統仍依授課節數計算「建議配分」供參考；實際配分由教師調整，但全卷合計必須為 100 分。</p>
       ${plan.ok ? `
         <div class="table-scroll">
           <table class="data-table">
@@ -756,10 +844,52 @@ function renderAllocationsStep() {
             </tfoot>
           </table>
         </div>
+        <h3>目標實際配分</h3>
+        <p class="${objectiveValidation.totalMatches ? "success-notice" : "field-error"}">
+          全卷實際配分合計 ${formatPrintScore(objectiveValidation.totalActualScore)}／100 分。
+        </p>
+        <div class="table-scroll">
+          <table class="data-table data-table--compact">
+            <thead>
+              <tr>
+                <th>目標編號</th>
+                <th>授課節數</th>
+                <th>建議配分</th>
+                <th>實際配分</th>
+                <th>提醒</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${objectiveValidation.rows.map((row) => `
+                <tr>
+                  <td>${escapeHtml(row.objectiveId)}</td>
+                  <td class="print-number">${escapeHtml(row.periodCount)}</td>
+                  <td class="print-number">${escapeHtml(formatPrintScore(row.suggestedScore))}</td>
+                  <td>
+                    <input
+                      class="score-input"
+                      type="number"
+                      min="1"
+                      step="1"
+                      data-objective-allocation
+                      data-objective-id="${escapeHtml(row.objectiveId)}"
+                      value="${escapeHtml(row.actualScore)}"
+                    >
+                  </td>
+                  <td>
+                    ${row.errors.length > 0 ? `<span class="text-error">${escapeHtml(row.errors.join(" "))}</span>` : ""}
+                    ${row.warnings.length > 0 ? `<span class="text-warning">${escapeHtml(row.warnings.join(" "))}</span>` : ""}
+                    ${row.errors.length === 0 && row.warnings.length === 0 ? "符合" : ""}
+                  </td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
       ` : `<ul class="row-errors">${plan.errors.map((error) => `<li>${escapeHtml(formatUserFacingError(error))}</li>`).join("")}</ul>`}
       <div class="step-actions">
         <button class="button button--secondary" type="button" data-action="go-step" data-target-step="2">上一步</button>
-        <button class="button" type="button" data-action="allocations-next" ${plan.ok ? "" : "disabled"}>下一步</button>
+        <button class="button" type="button" data-action="allocations-next" ${plan.ok && objectiveValidation.ok ? "" : "disabled"}>下一步</button>
       </div>
     </section>
   `;
@@ -939,6 +1069,7 @@ function renderBlueprintStep() {
     sections,
     objectives: state.objectives,
     allocations: state.allocations,
+    objectiveAllocations: getEffectiveObjectiveAllocations(),
   });
   const canProceed = summary.allMatched;
   const warningClass = showBlueprintErrors ? "row-errors" : "hint-text";
@@ -1057,6 +1188,7 @@ function getCurrentSectionSummary() {
     sections: getSectionsWithDisplayTitles(),
     objectives: state.objectives,
     allocations: state.allocations,
+    objectiveAllocations: getEffectiveObjectiveAllocations(),
   });
 }
 
@@ -1114,6 +1246,7 @@ function renderSectionOverview(summary) {
                 <tr>
                   <th>目標編號</th>
                   <th>應配分</th>
+                  <th>規劃題數</th>
                   <th>涵蓋大題數</th>
                   <th>狀態</th>
                 </tr>
@@ -1123,6 +1256,7 @@ function renderSectionOverview(summary) {
                   <tr>
                     <td>${escapeHtml(objective.objectiveId)}</td>
                     <td class="print-number">${escapeHtml(formatPrintScore(objective.score))}</td>
+                    <td class="print-number">${escapeHtml(objective.plannedCount)}</td>
                     <td class="print-number">${escapeHtml(objective.coverageCount)}</td>
                     <td>${objective.covered ? "已涵蓋" : "未涵蓋"}</td>
                   </tr>
@@ -1139,7 +1273,7 @@ function renderSectionOverview(summary) {
 function getPromptResult() {
   return buildItemGenerationPrompt({
     project: state.project ?? {},
-    allocations: state.allocations,
+    allocations: getActualUnitAllocations(),
     objectives: state.objectives,
     blueprint: state.blueprint,
     materialText: state.materialText,
@@ -1181,7 +1315,7 @@ function renderPromptStep() {
       <h2 id="current-step-title">⑤生成備選題</h2>
       <label class="compact-field">
         <span>每個目標每種題型生成幾題備選</span>
-        <input type="number" min="2" max="5" step="1" data-candidates-per-objective value="${escapeHtml(state.candidatesPerObjective)}">
+        <input type="number" min="2" max="10" step="1" data-candidates-per-objective value="${escapeHtml(state.candidatesPerObjective)}">
       </label>
       ${apiAvailable ? `
         <section class="api-mode-block">
@@ -1237,7 +1371,7 @@ function renderCandidateOption(item) {
         >
         <span>選入試卷</span>
       </label>
-      <p><strong>${escapeHtml(item.questionType || "未填題型")}</strong>｜${escapeHtml(item.score)} 分</p>
+      <p><strong>${escapeHtml(item.questionType || "未填題型")}</strong>｜選入後依目標配分自動計分</p>
       <p>${escapeHtml(item.question || "未填題幹")}</p>
       <p class="hint-text">選項：${escapeHtml(optionText)}</p>
       <p class="hint-text">答案：${escapeHtml(item.answer || "未填")}｜目標：${escapeHtml((item.objectiveIds ?? []).join("、"))}</p>
@@ -1248,7 +1382,6 @@ function renderCandidateOption(item) {
 function renderGroupCandidateCard(groupItems) {
   const firstItem = groupItems[0] ?? {};
   const isSelected = groupItems.every((item) => item.selected === true);
-  const totalScore = groupItems.reduce((sum, item) => sum + (Number(item.score) || 0), 0);
   const cognitiveLevels = [...new Set(
     groupItems
       .map((item) => item.cognitiveLevel)
@@ -1266,7 +1399,7 @@ function renderGroupCandidateCard(groupItems) {
         >
         <span>整組選入試卷</span>
       </label>
-      <p><strong>題組</strong>｜${groupItems.length} 小題｜${escapeHtml(formatPrintScore(totalScore))} 分</p>
+      <p><strong>題組</strong>｜${groupItems.length} 小題｜選入後依目標配分自動計分</p>
       ${firstItem.stimulus ? `<div class="stimulus">${escapeHtml(firstItem.stimulus)}</div>` : ""}
       ${cognitiveLevels.length > 0 ? `<p class="hint-text">認知層次：${escapeHtml(cognitiveLevels.join("、"))}</p>` : ""}
       <ol class="candidate-subitems">
@@ -1274,7 +1407,7 @@ function renderGroupCandidateCard(groupItems) {
           <li>
             <strong>${escapeHtml(item.questionType || "小題")}</strong>
             ${escapeHtml(item.question || "未填題幹")}
-            <span class="hint-text">（${escapeHtml(formatPrintScore(item.score))} 分｜目標：${escapeHtml((item.objectiveIds ?? []).join("、"))}${item.cognitiveLevel ? `｜${escapeHtml(item.cognitiveLevel)}` : ""}）</span>
+            <span class="hint-text">（目標：${escapeHtml((item.objectiveIds ?? []).join("、"))}${item.cognitiveLevel ? `｜${escapeHtml(item.cognitiveLevel)}` : ""}）</span>
           </li>
         `).join("")}
       </ol>
@@ -1348,28 +1481,22 @@ function renderSelectionObjectiveSummary(summary) {
   return `
     <details class="mapping-details">
       <summary>查看目標配分檢查</summary>
-      <div class="table-scroll">
-        <table class="data-table data-table--compact">
-          <thead>
-            <tr>
-              <th>目標編號</th>
-              <th>已選配分</th>
-              <th>應配分</th>
-              <th>狀態</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${summary.objectiveSummaries.map((objective) => `
-              <tr>
-                <td>${escapeHtml(objective.objectiveId)}</td>
-                <td class="print-number">${escapeHtml(formatPrintScore(objective.selectedScore))}</td>
-                <td class="print-number">${escapeHtml(formatPrintScore(objective.expectedScore))}</td>
-                <td>${objective.status === "pass" ? "符合" : "需調整"}</td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      </div>
+      <ul class="selection-score-list">
+        ${summary.objectiveSummaries.map((objective) => {
+          const statusIcon = objective.status === "pass" ? "✅" : "❌";
+          const perItemScore =
+            objective.perItemScore === null || objective.perItemScore === undefined
+              ? "無法平分"
+              : `${formatPrintScore(objective.perItemScore)} 分`;
+
+          return `
+            <li class="${objective.status === "pass" ? "success-notice" : "field-error"}">
+              目標 ${escapeHtml(objective.objectiveId)}｜共 ${escapeHtml(formatPrintScore(objective.expectedScore))} 分｜已選 ${escapeHtml(objective.selectedCount)} 題｜每題 ${escapeHtml(perItemScore)}｜合計 ${escapeHtml(formatPrintScore(objective.selectedScore))} ${statusIcon}
+              ${objective.status === "pass" ? "" : `<br><small>${escapeHtml(objective.message)}</small>`}
+            </li>
+          `;
+        }).join("")}
+      </ul>
     </details>
   `;
 }
@@ -1387,23 +1514,19 @@ function renderSelectionStep() {
   return `
     <section class="step-panel" aria-labelledby="current-step-title">
       <h2 id="current-step-title">⑥選題組卷</h2>
-      <p class="notice notice--inline">請從備選題中勾選要放入正式試卷的題目。每個學習目標的已選配分必須等於步驟 4 的本目標總配分，全卷才可進入審題檢核。</p>
+      <p class="notice notice--inline">請從備選題中自由勾選要放入正式試卷的題目。系統會依每個目標總配分平均分給該目標已選題目；若無法整除為正整數，需調整選題數或回步驟 ③ 調整配分。</p>
       <p>目前共有 ${candidateCount} 題備選題，已選 ${summary.selectedItems.length} 題，已選總分 ${formatPrintScore(summary.totalSelectedScore)}／應選 ${formatPrintScore(summary.totalExpectedScore)} 分。</p>
       ${summary.errors.length > 0 ? `<ul class="row-errors">${summary.errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul>` : `<p class="success-notice">已選題目配分與藍圖完全一致。</p>`}
       ${renderSelectionObjectiveSummary(summary)}
       ${getSectionsWithDisplayTitles().map((section) => {
         const candidates = getCandidatesForSection(section);
         const selectedCandidates = candidates.filter((item) => item.selected);
-        const selectedScore = selectedCandidates.reduce(
-          (total, item) => total + (Number(item.score) || 0),
-          0,
-        );
 
         return `
           <section class="selection-objective">
             <h3>${escapeHtml(section.title)}</h3>
             <p class="unit-summary">
-              已選 ${selectedCandidates.length} 題／預計 ${escapeHtml(section.plannedCount)} 題，已選配分 ${formatPrintScore(selectedScore)} 分
+              已選 ${selectedCandidates.length} 題／預計 ${escapeHtml(section.kind === "group" ? section.subCount : section.plannedCount)} 題；題分會依目標配分於確認選題時自動均分。
             </p>
             <p class="hint-text">涵蓋目標：${escapeHtml((section.objectiveIds ?? []).join("、"))}</p>
             ${candidates.length > 0 ? (section.kind === "group" ? renderGroupCandidates(candidates) : renderCandidatesByType(candidates)) : `<p class="field-error">此大題目前沒有備選題，請回步驟 5 重新生成或改用手動出題。</p>`}
@@ -1426,7 +1549,7 @@ function getItemValidationErrors(items) {
   const errors = [];
 
   items.forEach((item, index) => {
-    const result = validateItem(item, { isChinese: isChineseProject() });
+    const result = validateItemForUi(item, { isChinese: isChineseProject() });
 
     result.errors.forEach((error) => {
       errors.push(`第 ${index + 1} 題 ${formatUserFacingError(error)}`);
@@ -1794,9 +1917,12 @@ function renderItemsStep() {
       <section class="items-editor" aria-label="逐題編修">
         <div class="section-heading">
           <h3>逐題編修</h3>
-          <button class="button" type="button" data-action="run-audit" ${state.items.length > 0 ? "" : "disabled"}>執行審題檢核</button>
+          <p class="hint-text">請逐一確認題目後，於下方執行審核。</p>
         </div>
         ${renderGroupedItems()}
+        <div class="step-actions">
+          <button class="button" type="button" data-action="run-audit" ${state.items.length > 0 ? "" : "disabled"}>執行試題審核</button>
+        </div>
       </section>
       ${renderAuditReport()}
       <div class="step-actions">
@@ -1809,7 +1935,7 @@ function renderItemsStep() {
 function getPrintData() {
   return buildPrintData({
     project: state.project,
-    allocations: state.allocations,
+    allocations: getActualUnitAllocations(),
     objectives: state.objectives,
     items: state.items,
     auditReport: state.auditReport,
@@ -2480,15 +2606,26 @@ function handleObjectivesNext() {
   showObjectiveErrors = false;
   allocationErrors = [];
   notice = "";
+  const objectiveAllocations = buildDefaultObjectiveAllocations({
+    objectives,
+    totalScore: 100,
+  });
   dispatchMany([
     { type: "SET_OBJECTIVES", payload: objectives },
     { type: "SET_ALLOCATIONS", payload: plan.allocations },
+    { type: "SET_OBJECTIVE_ALLOCATIONS", payload: objectiveAllocations },
     { type: "GO_TO_STEP", payload: 3 },
   ]);
 }
 
 function handleAllocationsNext() {
   const plan = getAllocationPlan(state.objectives);
+  const objectiveAllocations = getEffectiveObjectiveAllocations();
+  const validation = validateAllocations({
+    objectives: state.objectives,
+    allocations: objectiveAllocations,
+    totalScore: 100,
+  });
 
   if (!plan.ok) {
     allocationErrors = plan.errors;
@@ -2497,8 +2634,18 @@ function handleAllocationsNext() {
     return;
   }
 
+  if (!validation.ok) {
+    allocationErrors = validation.errors;
+    notice = validation.errors[0];
+    render();
+    return;
+  }
+
+  allocationErrors = [];
+  notice = "";
   dispatchMany([
     { type: "SET_ALLOCATIONS", payload: plan.allocations },
+    { type: "SET_OBJECTIVE_ALLOCATIONS", payload: objectiveAllocations },
     { type: "GO_TO_STEP", payload: 4 },
   ]);
 }
@@ -3161,7 +3308,7 @@ function handleItemEditSubmit(event) {
   const itemIndex = Number(form.dataset.itemEditForm);
   const originalItem = state.items[itemIndex];
   const editedItem = collectEditedItem(form, originalItem);
-  const result = validateItem(editedItem, { isChinese: isChineseProject() });
+  const result = validateItemForUi(editedItem, { isChinese: isChineseProject() });
 
   if (!result.valid) {
     itemEditErrors = result.errors;
@@ -3201,12 +3348,12 @@ function handleRunAudit() {
         subject: getCanonicalSubjectLabel(state.project.subject),
       }
     : state.project;
-  const report = auditExam({
+  const report = adaptFlexibleScoringReport(auditExam({
     project: auditProject,
-    allocations: state.allocations,
+    allocations: getActualUnitAllocations(),
     objectives: state.objectives,
-    items: state.items,
-  });
+    items: normalizeItemsForAudit(state.items),
+  }));
   const sectionCount = Object.values(report.sections ?? {}).filter(
     (section) => section?.severity === "warning",
   ).length;
@@ -3222,6 +3369,33 @@ function handleRunAudit() {
       block: "start",
     });
   });
+}
+
+function adaptFlexibleScoringReport(report) {
+  if (!report || typeof report !== "object") {
+    return report;
+  }
+
+  const sections = report.sections ?? {};
+  const coveragePass = sections.coverage?.severity === "pass";
+  const scoresPass = sections.scores?.severity === "pass";
+  const nextChecklist = Array.isArray(report.checklistSuggestions)
+    ? report.checklistSuggestions.map((item) =>
+        item.key === "objective_alignment" && coveragePass && scoresPass
+          ? {
+              ...item,
+              suggested: true,
+              reason:
+                "學習目標已完成覆蓋，且 UI 層實際配分合計為 100；節數比例建議已作為參考提醒呈現。",
+            }
+          : item,
+      )
+    : report.checklistSuggestions;
+
+  return {
+    ...report,
+    checklistSuggestions: nextChecklist,
+  };
 }
 
 function handleConfirmRenumberObjectives() {
@@ -3547,6 +3721,7 @@ async function handleClick(event) {
 function handleInput(event) {
   const projectField = event.target.closest("[data-project-field]");
   const objectiveField = event.target.closest("[data-objective-field]");
+  const objectiveAllocationField = event.target.closest("[data-objective-allocation]");
   const sectionField = event.target.closest("[data-section-field]");
   const sectionObjectiveField = event.target.closest("[data-section-objective]");
   const blueprintField = event.target.closest("[data-blueprint-field], [data-blueprint-type]");
@@ -3584,6 +3759,28 @@ function handleInput(event) {
     });
     clearRenumberFeedback();
     saveState();
+    return;
+  }
+
+  if (objectiveAllocationField) {
+    const objectiveId = objectiveAllocationField.dataset.objectiveId;
+    const nextAllocations = getEffectiveObjectiveAllocations().map((allocation) =>
+      allocation.objectiveId === objectiveId
+        ? {
+            ...allocation,
+            actualScore: Number(objectiveAllocationField.value),
+          }
+        : allocation,
+    );
+
+    allocationErrors = [];
+    state = applyAction(state, {
+      type: "SET_OBJECTIVE_ALLOCATIONS",
+      payload: nextAllocations,
+      updatedAt: new Date().toISOString(),
+    });
+    saveState();
+    render();
     return;
   }
 

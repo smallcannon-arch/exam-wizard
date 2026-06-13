@@ -9,6 +9,7 @@ export function createInitialState() {
     project: null,
     objectives: [],
     allocations: [],
+    objectiveAllocations: [],
     typePlanMode: null,
     sections: [],
     blueprint: [],
@@ -34,7 +35,7 @@ function normalizeTypePlanMode(payload) {
 
 function normalizeCandidatesPerObjective(payload) {
   const value = Number(payload);
-  return Number.isInteger(value) && value >= 2 && value <= 5 ? value : 3;
+  return Number.isInteger(value) && value >= 2 && value <= 10 ? value : 3;
 }
 
 function normalizeSection(section, index = 0) {
@@ -129,6 +130,13 @@ function remapBlueprintObjectiveIds(blueprint, mapping) {
   }));
 }
 
+function remapObjectiveAllocations(allocations, mapping) {
+  return cloneArrayPayload(allocations).map((allocation) => ({
+    ...allocation,
+    objectiveId: remapObjectiveId(allocation?.objectiveId, mapping),
+  }));
+}
+
 function remapSectionObjectiveIds(sections, mapping) {
   return normalizeSections(sections).map((section) => ({
     ...section,
@@ -166,6 +174,7 @@ export function applyAction(state, action) {
           ...currentState,
           objectives: cloneArrayPayload(currentAction.payload),
           allocations: [],
+          objectiveAllocations: [],
           typePlanMode: null,
           sections: [],
           blueprint: [],
@@ -182,6 +191,22 @@ export function applyAction(state, action) {
         {
           ...currentState,
           allocations: cloneArrayPayload(currentAction.payload),
+        },
+        currentAction,
+      );
+    case "SET_OBJECTIVE_ALLOCATIONS":
+      return withUpdatedAt(
+        {
+          ...currentState,
+          objectiveAllocations: cloneArrayPayload(currentAction.payload),
+          typePlanMode: null,
+          sections: [],
+          blueprint: [],
+          promptGeneratedAt: null,
+          candidatePool: [],
+          items: [],
+          auditReport: null,
+          auditStale: false,
         },
         currentAction,
       );
@@ -403,6 +428,10 @@ export function applyAction(state, action) {
         {
           ...currentState,
           objectives: cloneArrayPayload(result.objectives),
+          objectiveAllocations: remapObjectiveAllocations(
+            currentState.objectiveAllocations,
+            mapping,
+          ),
           sections: remapSectionObjectiveIds(currentState.sections, mapping),
           blueprint: remapBlueprintObjectiveIds(currentState.blueprint, mapping),
           candidatePool: remapItemObjectiveIds(currentState.candidatePool, mapping),
@@ -447,6 +476,7 @@ function isValidState(value) {
     Object.prototype.hasOwnProperty.call(value, "project") &&
     Array.isArray(value.objectives) &&
     Array.isArray(value.allocations) &&
+    (Array.isArray(value.objectiveAllocations) || value.objectiveAllocations === undefined) &&
     (Array.isArray(value.sections) || value.sections === undefined) &&
     Array.isArray(value.blueprint) &&
     Array.isArray(value.items) &&
@@ -472,6 +502,9 @@ export function deserializeState(json) {
         ...parsed,
         objectives: [...parsed.objectives],
         allocations: [...parsed.allocations],
+        objectiveAllocations: Array.isArray(parsed.objectiveAllocations)
+          ? [...parsed.objectiveAllocations]
+          : [],
         typePlanMode: normalizeTypePlanMode(parsed.typePlanMode),
         sections: normalizeSections(parsed.sections),
         blueprint: [...parsed.blueprint],
