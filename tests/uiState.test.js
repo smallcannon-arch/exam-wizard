@@ -147,6 +147,52 @@ describe("ui state", () => {
     expect(idleState.updatedAt).toBe("2026-06-13T10:02:00+08:00");
   });
 
+  it("SET_CANDIDATES_PER_OBJECTIVE 僅接受 2 到 5 的整數", () => {
+    expect(
+      applyAction(createInitialState(), {
+        type: "SET_CANDIDATES_PER_OBJECTIVE",
+        payload: 2,
+      }).candidatesPerObjective,
+    ).toBe(2);
+    expect(
+      applyAction(createInitialState(), {
+        type: "SET_CANDIDATES_PER_OBJECTIVE",
+        payload: 5,
+      }).candidatesPerObjective,
+    ).toBe(5);
+    expect(
+      applyAction(createInitialState(), {
+        type: "SET_CANDIDATES_PER_OBJECTIVE",
+        payload: 1,
+      }).candidatesPerObjective,
+    ).toBe(3);
+    expect(
+      applyAction(createInitialState(), {
+        type: "SET_CANDIDATES_PER_OBJECTIVE",
+        payload: 6,
+      }).candidatesPerObjective,
+    ).toBe(3);
+  });
+
+  it("SET_CANDIDATE_POOL 會清除舊正式題庫與審題報告", () => {
+    const state = {
+      ...createInitialState(),
+      candidatePool: [{ itemId: "C-00" }],
+      items: [{ itemId: "A-01" }],
+      auditReport: { overallSeverity: "pass" },
+      auditStale: true,
+    };
+    const result = applyAction(state, {
+      type: "SET_CANDIDATE_POOL",
+      payload: [{ itemId: "C-01", selected: true }],
+    });
+
+    expect(result.candidatePool).toEqual([{ itemId: "C-01", selected: true }]);
+    expect(result.items).toEqual([]);
+    expect(result.auditReport).toBeNull();
+    expect(result.auditStale).toBe(false);
+  });
+
   it("items 變更後 auditReport 會標記為過期", () => {
     const itemState = applyAction(createInitialState(), {
       type: "SET_ITEMS",

@@ -530,6 +530,70 @@ textarea:focus-visible {
   text-align: center;
 }
 
+.compact-field {
+  display: grid;
+  gap: 0.35rem;
+  max-width: 18rem;
+  margin: 0.75rem 0;
+}
+
+.compact-field input {
+  max-width: 6rem;
+  text-align: center;
+}
+
+.selection-objective {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  margin: 1rem 0;
+  background: var(--color-surface);
+}
+
+.selection-objective--pass {
+  border-color: color-mix(in srgb, var(--color-pass) 45%, var(--color-border));
+}
+
+.selection-objective--error {
+  border-color: color-mix(in srgb, var(--color-error) 35%, var(--color-border));
+}
+
+.candidate-type-group {
+  margin-top: 1rem;
+}
+
+.candidate-type-group h4 {
+  margin: 0 0 0.5rem;
+}
+
+.candidate-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.candidate-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  background: #fff;
+}
+
+.candidate-card--selected {
+  border-color: var(--color-primary);
+  background: #f4f8fb;
+}
+
+.candidate-card p {
+  margin: 0.25rem 0;
+}
+
+.candidate-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 700;
+}
+
 .input-invalid {
   border-color: var(--color-error);
   box-shadow: 0 0 0 2px rgba(179, 38, 30, 0.12);

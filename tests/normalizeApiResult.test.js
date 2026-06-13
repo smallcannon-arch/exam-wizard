@@ -91,3 +91,43 @@ describe("normalizeApiResult", () => {
     expect(result.error).toContain("第 1 題");
   });
 });
+
+describe("normalizeApiResult 題型建議", () => {
+  const typeSuggestion = {
+    objectiveId: "4-1-1",
+    recommendedTypes: ["選擇題", "應用題"],
+    reason: "此目標需要理解與應用，適合以選擇題搭配應用題檢核。",
+  };
+
+  it("typeSuggestions 成功時回傳 suggestions", () => {
+    expect(
+      normalizeApiResult(
+        { ok: true, suggestions: [typeSuggestion] },
+        "typeSuggestions",
+      ),
+    ).toEqual({
+      ok: true,
+      suggestions: [typeSuggestion],
+    });
+  });
+
+  it("typeSuggestions 缺 suggestions 時回傳可讀錯誤", () => {
+    const result = normalizeApiResult({ ok: true }, "typeSuggestions");
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("題型建議");
+  });
+
+  it("typeSuggestions recommendedTypes 型別錯誤時回傳可讀錯誤", () => {
+    const result = normalizeApiResult(
+      {
+        ok: true,
+        suggestions: [{ ...typeSuggestion, recommendedTypes: "選擇題" }],
+      },
+      "typeSuggestions",
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("第 1 筆題型建議");
+  });
+});

@@ -47,10 +47,16 @@ function readyForStep4() {
 }
 
 function readyForStep5() {
-  return applyAction(readyForStep4(), {
-    type: "SET_BLUEPRINT",
-    payload: [validBlueprint],
-  });
+  return applyAction(
+    applyAction(readyForStep4(), {
+      type: "SET_TYPE_PLAN_MODE",
+      payload: "manual",
+    }),
+    {
+      type: "SET_BLUEPRINT",
+      payload: [validBlueprint],
+    },
+  );
 }
 
 function readyForStep6() {
@@ -112,9 +118,24 @@ describe("ui guards", () => {
   });
 
   it("步驟 4 到 5 需藍圖全數吻合", () => {
-    const badBlueprintState = applyAction(readyForStep4(), {
+    const missingModeState = applyAction(readyForStep4(), {
       type: "SET_BLUEPRINT",
-      payload: [{ ...validBlueprint, plannedScore: 99 }],
+      payload: [validBlueprint],
+    });
+    const badBlueprintState = applyAction(
+      applyAction(readyForStep4(), {
+        type: "SET_TYPE_PLAN_MODE",
+        payload: "manual",
+      }),
+      {
+        type: "SET_BLUEPRINT",
+        payload: [{ ...validBlueprint, plannedScore: 99 }],
+      },
+    );
+
+    expect(canEnterStep(missingModeState, 5)).toEqual({
+      allowed: false,
+      reason: "請先在步驟 4 選擇題型規劃模式。",
     });
 
     expect(canEnterStep(badBlueprintState, 5)).toEqual({
@@ -138,10 +159,10 @@ describe("ui guards", () => {
     });
   });
 
-  it("步驟 6 到 7 需 items 非空，手動 prompt 已產生時可進入貼回", () => {
+  it("步驟 6 到 7 需 items 非空", () => {
     expect(canEnterStep(readyForStep6(), 7)).toEqual({
       allowed: false,
-      reason: "請先完成步驟 6：選題組卷，或在步驟 5 產生手動出題指令。",
+      reason: "請先完成步驟 6：選題組卷。",
     });
 
     const manualPromptState = applyAction(readyForStep5(), {
@@ -150,8 +171,8 @@ describe("ui guards", () => {
     });
 
     expect(canEnterStep(manualPromptState, 7)).toEqual({
-      allowed: true,
-      reason: "",
+      allowed: false,
+      reason: "請先完成步驟 6：選題組卷。",
     });
     expect(canEnterStep(readyForStep7(), 7)).toEqual({
       allowed: true,

@@ -98,6 +98,22 @@ describe("planItemBatches", () => {
     expect(result.batches[0].requestedItemCount).toBe(4);
   });
 
+  it("candidatesPerObjective 為 3 時會依總生成量切批", () => {
+    const result = planItemBatches({
+      objectives: [objective("1-1-1"), objective("1-1-2")],
+      blueprint: [
+        blueprint("1-1-1", "一、探索星空", ["選擇題", "應用題"]),
+        blueprint("1-1-2", "一、探索星空", ["選擇題", "填充題"]),
+      ],
+      perObjective: 3,
+      maxItemsPerBatch: 6,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.batches.map((batch) => batch.perObjective)).toEqual([3, 3]);
+    expect(result.batches.map((batch) => batch.requestedItemCount)).toEqual([6, 6]);
+  });
+
   it("單一目標題型過多時會切成多批", () => {
     const result = planItemBatches({
       objectives: [objective("1-1-1")],

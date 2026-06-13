@@ -25,6 +25,10 @@ function hasBlueprint(state) {
   return summarizeBlueprint(state.allocations, state.blueprint).allMatched;
 }
 
+function hasTypePlanMode(state) {
+  return state?.typePlanMode === "ai" || state?.typePlanMode === "manual";
+}
+
 function hasPromptGenerated(state) {
   return (
     typeof state?.promptGeneratedAt === "string" &&
@@ -71,12 +75,14 @@ const STEP_RULES = {
     { ok: hasProject, reason: "請先完成步驟 1：建立試卷。" },
     { ok: hasObjectives, reason: "請先完成步驟 2：匯入學習目標。" },
     { ok: hasAllocations, reason: "請先完成步驟 3：節數配分。" },
+    { ok: hasTypePlanMode, reason: "請先在步驟 4 選擇題型規劃模式。" },
     { ok: hasBlueprint, reason: "請先完成步驟 4：題型規劃。" },
   ],
   6: [
     { ok: hasProject, reason: "請先完成步驟 1：建立試卷。" },
     { ok: hasObjectives, reason: "請先完成步驟 2：匯入學習目標。" },
     { ok: hasAllocations, reason: "請先完成步驟 3：節數配分。" },
+    { ok: hasTypePlanMode, reason: "請先在步驟 4 選擇題型規劃模式。" },
     { ok: hasBlueprint, reason: "請先完成步驟 4：題型規劃。" },
     { ok: hasCandidatePool, reason: "請先完成步驟 5：生成備選題。" },
   ],
@@ -84,10 +90,11 @@ const STEP_RULES = {
     { ok: hasProject, reason: "請先完成步驟 1：建立試卷。" },
     { ok: hasObjectives, reason: "請先完成步驟 2：匯入學習目標。" },
     { ok: hasAllocations, reason: "請先完成步驟 3：節數配分。" },
+    { ok: hasTypePlanMode, reason: "請先在步驟 4 選擇題型規劃模式。" },
     { ok: hasBlueprint, reason: "請先完成步驟 4：題型規劃。" },
     {
-      ok: hasItemsOrManualPrompt,
-      reason: "請先完成步驟 6：選題組卷，或在步驟 5 產生手動出題指令。",
+      ok: hasItems,
+      reason: "請先完成步驟 6：選題組卷。",
     },
   ],
   8: [

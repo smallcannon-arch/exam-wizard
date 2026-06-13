@@ -75,6 +75,17 @@ function isValidItem(item) {
   );
 }
 
+function isValidTypeSuggestion(suggestion) {
+  return (
+    isPlainObject(suggestion) &&
+    hasText(suggestion.objectiveId) &&
+    Array.isArray(suggestion.recommendedTypes) &&
+    suggestion.recommendedTypes.length > 0 &&
+    suggestion.recommendedTypes.every((questionType) => typeof questionType === "string") &&
+    typeof suggestion.reason === "string"
+  );
+}
+
 export function normalizeApiResult(raw, kind) {
   if (!isPlainObject(raw)) {
     return createError("AI 回覆格式不正確，請改用手動貼回。");
@@ -86,6 +97,10 @@ export function normalizeApiResult(raw, kind) {
     }
 
     return createError(raw.error);
+  }
+
+  if (kind === "typeSuggestions") {
+    return normalizeTypeSuggestionsResult(raw);
   }
 
   if (kind === "objectives") {
@@ -132,6 +147,27 @@ export function normalizeApiResult(raw, kind) {
   }
 
   return createError("AI 回覆類型不正確，請改用手動貼回。");
+}
+
+function normalizeTypeSuggestionsResult(raw) {
+  if (!Array.isArray(raw.suggestions)) {
+    return createError("AI 沒有回傳題型建議清單，請改用自行指定題型。");
+  }
+
+  const invalidIndex = raw.suggestions.findIndex(
+    (suggestion) => !isValidTypeSuggestion(suggestion),
+  );
+
+  if (invalidIndex >= 0) {
+    return createError(
+      `AI 回覆的第 ${invalidIndex + 1} 筆題型建議格式不完整，請改用自行指定題型。`,
+    );
+  }
+
+  return {
+    ok: true,
+    suggestions: raw.suggestions,
+  };
 }
 
 async function postApi(path, body, kind, timeoutMs = DEFAULT_TIMEOUT_MS) {
@@ -202,5 +238,16 @@ export function generateItemsViaApi({
       requestedItemCount,
     },
     "items",
+  );
+}
+
+export function suggestTypesViaApi({ project, objectives }) {
+  return postApi(
+    "/suggest-types",
+    {
+      project,
+      objectives,
+    },
+    "typeSuggestions",
   );
 }

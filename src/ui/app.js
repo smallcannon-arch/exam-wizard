@@ -4,7 +4,11 @@ import { buildObjectiveExtractionPrompt } from "../core/buildExtractionPrompt.js
 import { buildItemGenerationPrompt, parseItemsJson } from "../core/buildPrompt.js";
 import { validateItem, validateObjective } from "../core/schemas.js";
 import { isApiAvailable } from "./apiConfig.js";
-import { extractObjectivesViaApi, generateItemsViaApi } from "./apiClient.js";
+import {
+  extractObjectivesViaApi,
+  generateItemsViaApi,
+  suggestTypesViaApi,
+} from "./apiClient.js";
 import { buildPrintData } from "./buildPrintData.js";
 import { replaceFieldLabels } from "./fieldLabels.js";
 import { mergeItemBatches, planItemBatches } from "./generateItemsBatched.js";
@@ -12,6 +16,7 @@ import { groupItemsByGroup } from "./groupItemsByGroup.js";
 import { groupObjectivesToUnits } from "./groupObjectivesToUnits.js";
 import { parseObjectivesTsv } from "./parseObjectivesTsv.js";
 import { renumberObjectives } from "./renumberObjectives.js";
+import { summarizeCandidateSelection } from "./selectItemsFromCandidates.js";
 import { summarizeBlueprint } from "./summarizeBlueprint.js";
 import { getCanonicalSubjectLabel, isChineseSubject } from "./subjects.js";
 import {
@@ -73,6 +78,9 @@ let renumberNotices = [];
 let renumberMappingRows = [];
 let allocationErrors = [];
 let showBlueprintErrors = false;
+let typeSuggestionError = "";
+let typeSuggestionSuccess = "";
+let typeSuggestionProgress = "";
 let copyStatus = "";
 let extractionCopyStatus = "";
 let generationApiError = "";
@@ -767,6 +775,7 @@ function getBlueprintRows() {
           ? ""
           : existing.plannedScore,
       groupHint: typeof existing?.groupHint === "string" ? existing.groupHint : "",
+      typeReason: typeof existing?.typeReason === "string" ? existing.typeReason : "",
     };
   });
 }
@@ -786,6 +795,7 @@ function collectBlueprintFromDom() {
       questionTypes: checkedTypes,
       plannedScore,
       groupHint,
+      typeReason: row.dataset.typeReason ?? "",
     };
   });
 }
@@ -797,6 +807,7 @@ function normalizeBlueprintForSubmit(rows) {
     questionTypes: [...row.questionTypes],
     plannedScore: Number(row.plannedScore),
     groupHint: row.groupHint.trim(),
+    typeReason: typeof row.typeReason === "string" ? row.typeReason : "",
   }));
 }
 
@@ -870,6 +881,8 @@ function renderUnitSummary(summary) {
 
 function renderTypePlanModeSelector() {
   const selectedMode = state.typePlanMode ?? "ai";
+  const apiAvailable = isApiAvailable();
+  const apiBusy = state.apiBusy === true;
 
   return `
     <section class="mode-selector" aria-label="題型規劃模式">
@@ -880,7 +893,7 @@ function renderTypePlanModeSelector() {
         data-mode="ai"
       >
         <strong>AI 分析題型</strong>
-        <span>推薦模式。AI 題型分析即將推出，請暫用自行指定。</span>
+        <span>推薦。系統先依學習目標建議題型，教師可再微調。</span>
       </button>
       <button
         class="mode-card ${selectedMode === "manual" ? "mode-card--selected" : ""}"
@@ -889,12 +902,22 @@ function renderTypePlanModeSelector() {
         data-mode="manual"
       >
         <strong>自行指定題型</strong>
-        <span>逐目標勾選題型並填入本目標總配分。</span>
+        <span>不呼叫 AI，由教師逐目標勾選題型與規劃配分。</span>
       </button>
     </section>
     ${
       selectedMode === "ai"
-        ? `<p class="notice notice--inline">AI 題型分析即將推出，請先選「自行指定題型」完成本步驟。</p>`
+        ? `
+          <div class="api-mode-block">
+            <p class="hint-text">AI 會依每個學習目標的動詞與內容，先建議 1～2 種題型；教師仍可在下方手動微調。</p>
+            ${apiAvailable ? `
+              ${typeSuggestionError ? `<p class="field-error">${escapeHtml(typeSuggestionError)} 可改用「自行指定題型」。</p>` : ""}
+              ${typeSuggestionSuccess ? `<p class="success-notice">${escapeHtml(typeSuggestionSuccess)}</p>` : ""}
+              ${typeSuggestionProgress ? `<p class="notice notice--inline">${escapeHtml(typeSuggestionProgress)}</p>` : ""}
+              <button class="button" type="button" data-action="suggest-types-api" ${apiBusy ? "disabled" : ""}>開始 AI 分析</button>
+            ` : `<p class="notice notice--inline">目前已關閉 API 模式，請改用自行指定題型。</p>`}
+          </div>
+        `
         : ""
     }
   `;
@@ -904,8 +927,7 @@ function renderBlueprintStep() {
   const rows = getBlueprintRows();
   const summary = summarizeBlueprint(state.allocations, normalizeBlueprintForSubmit(rows));
   const rowsByObjectiveId = new Map(rows.map((row, index) => [row.objectiveId, { row, index }]));
-  const selectedMode = state.typePlanMode ?? "ai";
-  const canProceed = selectedMode === "manual" && summary.allMatched;
+  const canProceed = summary.allMatched;
 
   return `
     <section class="step-panel" aria-labelledby="current-step-title">
@@ -957,10 +979,12 @@ function renderBlueprintStep() {
                         data-blueprint-row="${entry.index}"
                         data-objective-id="${escapeHtml(row.objectiveId)}"
                         data-unit-name="${escapeHtml(row.unitName)}"
+                        data-type-reason="${escapeHtml(row.typeReason)}"
                       >
                         <td>${escapeHtml(objective.objectiveId)}</td>
                         <td>
                           <span class="objective-preview" title="${escapeHtml(objective.text)}">${escapeHtml(objective.text)}</span>
+                          ${row.typeReason ? `<p class="hint-text">AI 建議理由：${escapeHtml(row.typeReason)}</p>` : ""}
                           ${showIssues && rowIssues.length > 0 ? `<ul class="row-errors">${rowIssues.map((issue) => `<li>${escapeHtml(issue)}</li>`).join("")}</ul>` : ""}
                         </td>
                         <td>${renderQuestionTypeControls(row, entry.index)}</td>
@@ -1031,10 +1055,14 @@ function renderPromptStep() {
         <span>教材摘要（選填）</span>
         <textarea data-material-text rows="5" placeholder="可自行輸入課文重點；也可以把課本內容請 AI 整理成摘要後貼入。">${escapeHtml(state.materialText)}</textarea>
       </label>
+      <label class="compact-field">
+        <span>每個目標每種題型生成幾題備選</span>
+        <input type="number" min="2" max="5" step="1" data-candidates-per-objective value="${escapeHtml(state.candidatesPerObjective)}">
+      </label>
       ${apiAvailable ? `
         <section class="api-mode-block">
           <h3>一鍵生成備選題</h3>
-          <p class="hint-text">按「生成題庫」，系統會依命題藍圖自動產生題目草稿，直接進入下一步檢核。AI 產出僅為草稿，務必逐題修改定稿。</p>
+          <p class="hint-text">按「生成備選題」，系統會依命題藍圖產生超量題目草稿，再到步驟 6 勾選正式試卷題目。AI 產出僅為草稿，務必逐題修改定稿。</p>
           ${generationApiError ? `<p class="field-error">${escapeHtml(generationApiError)} 可改用下方「手動出題指令」。</p>` : ""}
           ${generationApiSuccess ? `<p class="success-notice">${escapeHtml(generationApiSuccess)}</p>` : ""}
           ${generationApiProgress ? `<p class="notice notice--inline">${escapeHtml(generationApiProgress)}</p>` : ""}
@@ -1063,20 +1091,91 @@ function renderPromptStep() {
   `;
 }
 
+function getCandidatesForObjective(objectiveId) {
+  return state.candidatePool.filter((item) =>
+    Array.isArray(item.objectiveIds) && item.objectiveIds.includes(objectiveId),
+  );
+}
+
+function renderCandidateOption(item) {
+  const optionText = Array.isArray(item.options) && item.options.length > 0
+    ? item.options.join("／")
+    : "無選項";
+
+  return `
+    <article class="candidate-card ${item.selected ? "candidate-card--selected" : ""}">
+      <label class="candidate-select">
+        <input
+          type="checkbox"
+          data-action="toggle-candidate-selection"
+          data-candidate-id="${escapeHtml(item.itemId)}"
+          ${item.selected ? "checked" : ""}
+        >
+        <span>選入試卷</span>
+      </label>
+      <p><strong>${escapeHtml(item.questionType || "未填題型")}</strong>｜${escapeHtml(item.score)} 分</p>
+      <p>${escapeHtml(item.question || "未填題幹")}</p>
+      <p class="hint-text">選項：${escapeHtml(optionText)}</p>
+      <p class="hint-text">答案：${escapeHtml(item.answer || "未填")}｜目標：${escapeHtml((item.objectiveIds ?? []).join("、"))}</p>
+    </article>
+  `;
+}
+
+function renderCandidatesByType(candidates) {
+  const grouped = new Map();
+
+  candidates.forEach((item) => {
+    const questionType = item.questionType || "其他";
+    const entries = grouped.get(questionType) ?? [];
+    entries.push(item);
+    grouped.set(questionType, entries);
+  });
+
+  return [...grouped.entries()].map(([questionType, items]) => `
+    <section class="candidate-type-group">
+      <h4>${escapeHtml(questionType)}</h4>
+      <div class="candidate-list">
+        ${items.map(renderCandidateOption).join("")}
+      </div>
+    </section>
+  `).join("");
+}
+
 function renderSelectionStep() {
+  const summary = summarizeCandidateSelection({
+    objectives: state.objectives,
+    blueprint: state.blueprint,
+    candidatePool: state.candidatePool,
+  });
   const candidateCount = Array.isArray(state.candidatePool)
     ? state.candidatePool.length
     : 0;
-  const itemCount = Array.isArray(state.items) ? state.items.length : 0;
 
   return `
     <section class="step-panel" aria-labelledby="current-step-title">
       <h2 id="current-step-title">⑥選題組卷</h2>
-      <p class="notice notice--inline">選題功能即將推出。本版先將步驟 5 生成的備選題全數帶入正式題庫。</p>
-      <p>目前已有 ${candidateCount} 題備選題，已帶入正式題庫 ${itemCount} 題。</p>
+      <p class="notice notice--inline">請從備選題中勾選要放入正式試卷的題目。每個學習目標的已選配分必須等於步驟 4 的本目標總配分，全卷才可進入審題檢核。</p>
+      <p>目前共有 ${candidateCount} 題備選題，已選 ${summary.selectedItems.length} 題，已選總分 ${formatPrintScore(summary.totalSelectedScore)}／應選 ${formatPrintScore(summary.totalExpectedScore)} 分。</p>
+      ${summary.errors.length > 0 ? `<ul class="row-errors">${summary.errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul>` : `<p class="success-notice">已選題目配分與藍圖完全一致。</p>`}
+      ${state.objectives.map((objective) => {
+        const objectiveSummary = summary.objectiveSummaries.find(
+          (entry) => entry.objectiveId === objective.objectiveId,
+        );
+        const candidates = getCandidatesForObjective(objective.objectiveId);
+
+        return `
+          <section class="selection-objective ${objectiveSummary?.status === "pass" ? "selection-objective--pass" : "selection-objective--error"}">
+            <h3>${escapeHtml(objective.objectiveId)} ${escapeHtml(objective.text)}</h3>
+            <p class="unit-summary ${objectiveSummary?.status === "pass" ? "unit-summary--pass" : "unit-summary--error"}">
+              已選 ${formatPrintScore(objectiveSummary?.selectedScore ?? 0)} 分／應配 ${formatPrintScore(objectiveSummary?.expectedScore ?? 0)} 分
+            </p>
+            ${candidates.length > 0 ? renderCandidatesByType(candidates) : `<p class="field-error">此目標目前沒有備選題，請回步驟 5 重新生成或改用手動出題。</p>`}
+          </section>
+        `;
+      }).join("")}
       <div class="step-actions">
         <button class="button button--secondary" type="button" data-action="go-step" data-target-step="5">上一步</button>
-        <button class="button" type="button" data-action="go-step" data-target-step="7" ${itemCount > 0 ? "" : "disabled"}>前往審題檢核</button>
+        <button class="button" type="button" data-action="confirm-selection" ${summary.allMatched ? "" : "disabled"}>確認選題並前往審題檢核</button>
       </div>
     </section>
   `;
@@ -2181,12 +2280,6 @@ function handleBlueprintNext() {
 
   showBlueprintErrors = true;
 
-  if ((state.typePlanMode ?? "ai") !== "manual") {
-    notice = "AI 題型分析即將推出，請先選「自行指定題型」完成本步驟。";
-    render();
-    return;
-  }
-
   if (!summary.allMatched) {
     const firstInvalidEntry = summary.invalidEntries[0];
     notice =
@@ -2206,6 +2299,7 @@ function handleBlueprintNext() {
   showBlueprintErrors = false;
   notice = "";
   dispatchMany([
+    { type: "SET_TYPE_PLAN_MODE", payload: state.typePlanMode ?? "ai" },
     { type: "SET_BLUEPRINT", payload: rows },
     { type: "GO_TO_STEP", payload: 5 },
   ]);
@@ -2368,6 +2462,65 @@ async function handleStartApiExtraction() {
   });
 }
 
+function mergeTypeSuggestionsIntoBlueprintRows(suggestions) {
+  const suggestionByObjectiveId = new Map(
+    suggestions.map((suggestion) => [suggestion.objectiveId, suggestion]),
+  );
+
+  return getBlueprintRows().map((row) => {
+    const suggestion = suggestionByObjectiveId.get(row.objectiveId);
+
+    if (!suggestion) {
+      return row;
+    }
+
+    const recommendedTypes = suggestion.recommendedTypes.filter((questionType) =>
+      QUESTION_TYPES.includes(questionType),
+    );
+
+    return {
+      ...row,
+      questionTypes: recommendedTypes.length > 0 ? recommendedTypes : row.questionTypes,
+      typeReason: suggestion.reason,
+    };
+  });
+}
+
+async function handleSuggestTypesViaApi() {
+  if (state.apiBusy) {
+    return;
+  }
+
+  typeSuggestionError = "";
+  typeSuggestionSuccess = "";
+  typeSuggestionProgress = "AI 題型分析中，請稍候…";
+  setApiBusy(true);
+  render();
+
+  const result = await suggestTypesViaApi({
+    project: state.project,
+    objectives: state.objectives,
+  });
+
+  if (!result.ok) {
+    typeSuggestionError = result.error;
+    typeSuggestionProgress = "";
+    setApiBusy(false);
+    render();
+    return;
+  }
+
+  const rows = mergeTypeSuggestionsIntoBlueprintRows(result.suggestions);
+  typeSuggestionProgress = "";
+  typeSuggestionSuccess = `已完成 ${result.suggestions.length} 筆題型建議，可依需要微調。`;
+  showBlueprintErrors = false;
+  setApiBusy(false);
+  dispatchMany([
+    { type: "SET_TYPE_PLAN_MODE", payload: "ai" },
+    { type: "SET_BLUEPRINT", payload: rows },
+  ]);
+}
+
 async function handleGenerateItemsViaApiLegacy() {
   if (state.apiBusy) {
     return;
@@ -2430,7 +2583,7 @@ async function handleGenerateItemsViaApi() {
   const batchPlan = planItemBatches({
     objectives: state.objectives,
     blueprint: state.blueprint,
-    perObjective: 1,
+    perObjective: state.candidatesPerObjective,
   });
 
   if (!batchPlan.ok) {
@@ -2473,11 +2626,6 @@ async function handleGenerateItemsViaApi() {
           payload: completedItems,
           updatedAt: new Date().toISOString(),
         });
-        state = applyAction(state, {
-          type: "SET_ITEMS",
-          payload: completedItems,
-          updatedAt: new Date().toISOString(),
-        });
         saveState();
       }
 
@@ -2503,7 +2651,7 @@ async function handleGenerateItemsViaApi() {
 
   const validationErrors = getItemValidationErrors(merged.items);
   const invalidCount = countInvalidItems(validationErrors);
-  itemImportMessage = `已生成 ${merged.items.length} 題，請至步驟 7 檢核與編修。`;
+  itemImportMessage = `已生成 ${merged.items.length} 題備選題，請至步驟 6 選題組卷。`;
   itemImportErrors = validationErrors.map(toTeacherFacingImportText);
   generationApiSuccess = itemImportMessage;
   generationApiProgress = "";
@@ -2512,7 +2660,6 @@ async function handleGenerateItemsViaApi() {
   setApiBusy(false);
   dispatchMany([
     { type: "SET_CANDIDATE_POOL", payload: merged.items },
-    { type: "SET_ITEMS", payload: merged.items },
     { type: "GO_TO_STEP", payload: 6 },
   ]);
 
@@ -2520,6 +2667,41 @@ async function handleGenerateItemsViaApi() {
     notice = `已生成 ${merged.items.length} 題，其中 ${invalidCount} 題需要修正。`;
     render();
   }
+}
+
+function handleToggleCandidateSelection(candidateId, selected) {
+  const nextPool = state.candidatePool.map((item) =>
+    item.itemId === candidateId ? { ...item, selected } : item,
+  );
+
+  dispatch({
+    type: "SET_CANDIDATE_POOL",
+    payload: nextPool,
+  });
+}
+
+function handleConfirmSelection() {
+  const summary = summarizeCandidateSelection({
+    objectives: state.objectives,
+    blueprint: state.blueprint,
+    candidatePool: state.candidatePool,
+  });
+
+  if (!summary.allMatched) {
+    notice = summary.errors[0] ?? "請先完成選題配分。";
+    render();
+    return;
+  }
+
+  itemImportMessage = `已選入 ${summary.selectedItems.length} 題，請執行審題檢核。`;
+  itemImportErrors = getItemValidationErrors(summary.selectedItems).map(
+    toTeacherFacingImportText,
+  );
+  notice = "";
+  dispatchMany([
+    { type: "SET_ITEMS", payload: summary.selectedItems },
+    { type: "GO_TO_STEP", payload: 7 },
+  ]);
 }
 
 function handleParseItems() {
@@ -2854,6 +3036,9 @@ async function handleClick(event) {
   }
 
   if (action === "set-type-plan-mode") {
+    typeSuggestionError = "";
+    typeSuggestionSuccess = "";
+    typeSuggestionProgress = "";
     dispatch({
       type: "SET_TYPE_PLAN_MODE",
       payload: actionButton.dataset.mode,
@@ -2881,8 +3066,26 @@ async function handleClick(event) {
     return;
   }
 
+  if (action === "suggest-types-api") {
+    await handleSuggestTypesViaApi();
+    return;
+  }
+
   if (action === "generate-items-api") {
     await handleGenerateItemsViaApi();
+    return;
+  }
+
+  if (action === "toggle-candidate-selection") {
+    handleToggleCandidateSelection(
+      actionButton.dataset.candidateId,
+      actionButton.checked === true,
+    );
+    return;
+  }
+
+  if (action === "confirm-selection") {
+    handleConfirmSelection();
     return;
   }
 
@@ -2927,6 +3130,7 @@ function handleInput(event) {
   const tsvInput = event.target.closest("[data-tsv-input]");
   const extractionMaterialInput = event.target.closest("[data-extraction-material-text]");
   const materialTextInput = event.target.closest("[data-material-text]");
+  const candidatesPerObjectiveInput = event.target.closest("[data-candidates-per-objective]");
   const itemsJsonInput = event.target.closest("[data-items-json]");
 
   if (projectField) {
@@ -3003,6 +3207,16 @@ function handleInput(event) {
     });
     saveState();
     updatePromptPreview();
+    return;
+  }
+
+  if (candidatesPerObjectiveInput) {
+    state = applyAction(state, {
+      type: "SET_CANDIDATES_PER_OBJECTIVE",
+      payload: candidatesPerObjectiveInput.value,
+      updatedAt: new Date().toISOString(),
+    });
+    saveState();
     return;
   }
 

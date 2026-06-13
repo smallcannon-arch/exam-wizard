@@ -33,7 +33,7 @@ function normalizeTypePlanMode(payload) {
 
 function normalizeCandidatesPerObjective(payload) {
   const value = Number(payload);
-  return Number.isInteger(value) && value > 0 ? value : 3;
+  return Number.isInteger(value) && value >= 2 && value <= 5 ? value : 3;
 }
 
 function withUpdatedAt(state, action) {
@@ -144,6 +144,9 @@ export function applyAction(state, action) {
         {
           ...currentState,
           candidatePool: cloneArrayPayload(currentAction.payload),
+          items: [],
+          auditReport: null,
+          auditStale: false,
         },
         currentAction,
       );
