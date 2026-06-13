@@ -919,6 +919,31 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
+.review-science-table {
+  font-size: 10pt;
+}
+
+.review-science-table th,
+.review-science-table td {
+  padding: 4px 5px;
+}
+
+.print-total-row th {
+  background: #eeeeee;
+  text-align: center;
+}
+
+.print-notice,
+.print-notices {
+  border: 1px solid #777777;
+  margin: 8px 0 10px;
+  padding: 6px 8px;
+}
+
+.print-notices {
+  list-style-position: inside;
+}
+
 .print-section {
   margin-top: 18px;
 }

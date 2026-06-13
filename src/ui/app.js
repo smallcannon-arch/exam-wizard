@@ -13,6 +13,7 @@ import { groupObjectivesToUnits } from "./groupObjectivesToUnits.js";
 import { parseObjectivesTsv } from "./parseObjectivesTsv.js";
 import { renumberObjectives } from "./renumberObjectives.js";
 import { summarizeBlueprint } from "./summarizeBlueprint.js";
+import { getCanonicalSubjectLabel, isChineseSubject } from "./subjects.js";
 import {
   applyAction,
   createInitialState,
@@ -259,7 +260,7 @@ function isSelected(value, expected) {
 }
 
 function renderProjectForm() {
-  const isChinese = projectDraft.subject === "國語";
+  const isChinese = isChineseSubject(projectDraft.subject);
   const isOtherVersion = projectDraft.version === "其他";
 
   return `
@@ -1082,7 +1083,7 @@ function renderSelectionStep() {
 }
 
 function isChineseProject() {
-  return state.project?.subject === "國語";
+  return isChineseSubject(state.project?.subject);
 }
 
 function getItemValidationErrors(items) {
@@ -1792,6 +1793,118 @@ function renderReviewStages() {
   `;
 }
 
+function formatPrintScore(value) {
+  const number = Number(value) || 0;
+
+  if (Math.abs(number - Math.round(number)) < 1e-9) {
+    return String(Math.round(number));
+  }
+
+  return number.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function renderScienceScoreCell(typeResult) {
+  if (!typeResult || typeResult.score === 0) {
+    return "";
+  }
+
+  const itemNumbers = Array.isArray(typeResult.itemNumbers)
+    ? typeResult.itemNumbers
+    : [];
+  const label = itemNumbers.length > 0 ? itemNumbers.join("、") : "未列題號";
+
+  return `${escapeHtml(label)}(${escapeHtml(formatPrintScore(typeResult.score))})`;
+}
+
+function renderScienceReviewBody(reviewSheet) {
+  const questionTypes = reviewSheet.scienceQuestionTypes ?? [];
+
+  return `
+    <section class="review-section">
+      <h2>教學目標標註試卷題號與配分</h2>
+      ${reviewSheet.notices?.length > 0 ? `
+        <ul class="print-notices">
+          ${reviewSheet.notices.map((notice) => `<li>${escapeHtml(notice)}</li>`).join("")}
+        </ul>
+      ` : ""}
+      <table class="print-table review-science-table">
+        <thead>
+          <tr>
+            <th>大單元</th>
+            <th>小單元</th>
+            <th>目標編號</th>
+            <th>學習目標</th>
+            <th>節數</th>
+            ${questionTypes.map((questionType) => `<th>${escapeHtml(questionType)}</th>`).join("")}
+            <th>總計</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${reviewSheet.scienceRows.map((row) => `
+            <tr class="print-unit-row">
+              <td>${escapeHtml(row.unitName)}</td>
+              <td>${escapeHtml(row.lessonName)}</td>
+              <td>${escapeHtml(row.objectiveId)}</td>
+              <td>${escapeHtml(row.objectiveText)}</td>
+              <td class="print-number">${escapeHtml(row.periodCount)}</td>
+              ${questionTypes.map((questionType) => `
+                <td>${renderScienceScoreCell(row.byType?.[questionType])}</td>
+              `).join("")}
+              <td class="print-number">${escapeHtml(formatPrintScore(row.rowTotal))}</td>
+            </tr>
+          `).join("")}
+          <tr class="print-total-row">
+            <th colspan="5">合計</th>
+            ${questionTypes.map((questionType) => `
+              <th>${escapeHtml(formatPrintScore(reviewSheet.scienceTypeTotals?.[questionType] ?? 0))}</th>
+            `).join("")}
+            <th>${escapeHtml(formatPrintScore(reviewSheet.scienceGrandTotal))}</th>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  `;
+}
+
+function renderNonChineseReviewBody(reviewSheet) {
+  return `
+    <section class="review-section">
+      ${reviewSheet.format === "chinese_fallback" ? `
+        <p class="print-notice">${escapeHtml(reviewSheet.chineseFallbackNotice)}</p>
+      ` : ""}
+      <h2>單元與教學目標配分</h2>
+      <table class="print-table">
+        <thead>
+          <tr>
+            <th>大單元名稱</th>
+            <th>授課節數</th>
+            <th>出題佔分</th>
+            <th>教學目標</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${reviewSheet.unitRows.map((row) => `
+            <tr class="print-unit-row">
+              <td>${escapeHtml(row.unitName)}</td>
+              <td class="print-number">${escapeHtml(row.periodCount)}</td>
+              <td class="print-number">${escapeHtml(row.score)}</td>
+              <td>${escapeHtml(row.objectiveIds.join("、"))}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </section>
+  `;
+}
+
+function renderReviewSheetBody(reviewSheet) {
+  if (reviewSheet.format === "science") {
+    return renderScienceReviewBody(reviewSheet);
+  }
+
+  return renderNonChineseReviewBody(reviewSheet);
+}
+
 function renderReviewSheetPrint(reviewSheet) {
   return `
     <article class="print-document print-document--review-sheet">
@@ -1800,29 +1913,7 @@ function renderReviewSheetPrint(reviewSheet) {
         <p>${escapeHtml(reviewSheet.versionLabel)}</p>
       </header>
       ${renderReviewHeader(reviewSheet.project)}
-      <section class="review-section">
-        <h2>單元與教學目標配分</h2>
-        <table class="print-table">
-          <thead>
-            <tr>
-              <th>大單元名稱</th>
-              <th>授課節數</th>
-              <th>出題佔分</th>
-              <th>教學目標</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${reviewSheet.unitRows.map((row) => `
-              <tr class="print-unit-row">
-                <td>${escapeHtml(row.unitName)}</td>
-                <td class="print-number">${escapeHtml(row.periodCount)}</td>
-                <td class="print-number">${escapeHtml(row.score)}</td>
-                <td>${escapeHtml(row.objectiveIds.join("、"))}</td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      </section>
+      ${renderReviewSheetBody(reviewSheet)}
       ${renderReviewChecklist(reviewSheet.checklist)}
       ${renderReviewStages()}
     </article>
@@ -2544,8 +2635,14 @@ function handleDeleteItem(itemIndex) {
 }
 
 function handleRunAudit() {
+  const auditProject = state.project
+    ? {
+        ...state.project,
+        subject: getCanonicalSubjectLabel(state.project.subject),
+      }
+    : state.project;
   const report = auditExam({
-    project: state.project,
+    project: auditProject,
     allocations: state.allocations,
     objectives: state.objectives,
     items: state.items,
