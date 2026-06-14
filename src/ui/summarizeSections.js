@@ -1,6 +1,8 @@
 import { allocateScores } from "../core/allocateScores.js";
 import {
   buildDefaultObjectiveAllocations,
+  DEFAULT_MAX_PER_ITEM_SCORE,
+  legalQuestionCounts,
   validateAllocations,
 } from "./validateAllocations.js";
 
@@ -20,7 +22,12 @@ function getTotalScore(allocations = []) {
   return Number.isInteger(total) && total > 0 ? total : 100;
 }
 
-function buildObjectiveScores(objectives = [], allocations = [], objectiveAllocations = []) {
+function buildObjectiveScores(
+  objectives = [],
+  allocations = [],
+  objectiveAllocations = [],
+  maxPerItemScore = DEFAULT_MAX_PER_ITEM_SCORE,
+) {
   const totalScore = getTotalScore(allocations);
   const effectiveObjectiveAllocations =
     Array.isArray(objectiveAllocations) && objectiveAllocations.length > 0
@@ -30,6 +37,7 @@ function buildObjectiveScores(objectives = [], allocations = [], objectiveAlloca
     objectives,
     allocations: effectiveObjectiveAllocations,
     totalScore,
+    maxPerItemScore,
   });
 
   if (allocationResult.ok || allocationResult.rows.length > 0) {
@@ -138,11 +146,60 @@ function getPlannedCounts(sections = []) {
   return plannedCounts;
 }
 
+function buildLegalCountSuggestion(counts) {
+  return counts.length > 0 ? `建議題數：${counts.join("、")}。` : "";
+}
+
+function buildNormalSectionIssues({
+  section,
+  objectiveIds,
+  coverageCounts,
+  objectiveScores,
+  maxPerItemScore = DEFAULT_MAX_PER_ITEM_SCORE,
+}) {
+  if (section.kind === "group" || section.plannedCount < 1) {
+    return [];
+  }
+
+  return objectiveIds.flatMap((objectiveId) => {
+    const coverageCount = coverageCounts.get(objectiveId) ?? 1;
+    const sectionScore = (objectiveScores.get(objectiveId) ?? 0) / coverageCount;
+    const legalCounts = legalQuestionCounts({
+      objectiveScore: sectionScore,
+      maxPerItem: maxPerItemScore,
+    });
+    const suggestion = buildLegalCountSuggestion(legalCounts);
+
+    if (!Number.isInteger(sectionScore) || sectionScore <= 0) {
+      return [
+        `此大題目標 ${objectiveId} 配分 ${sectionScore} 分，無法在每題不超過 ${maxPerItemScore} 分下整除出題，請回步驟③調整配分或調整大題涵蓋。${suggestion}`,
+      ];
+    }
+
+    if (sectionScore % section.plannedCount !== 0) {
+      return [
+        `此大題目標 ${objectiveId} 配分 ${sectionScore} 分、題數 ${section.plannedCount}：無法整除。${suggestion}`,
+      ];
+    }
+
+    const perItemScore = sectionScore / section.plannedCount;
+
+    if (perItemScore > maxPerItemScore) {
+      return [
+        `此大題目標 ${objectiveId} 配分 ${sectionScore} 分、題數 ${section.plannedCount}：每題 ${perItemScore} 分超過每題最多 ${maxPerItemScore} 分。${suggestion}`,
+      ];
+    }
+
+    return [];
+  });
+}
+
 export function summarizeSections({
   sections = [],
   objectives = [],
   allocations = [],
   objectiveAllocations = [],
+  maxPerItemScore = DEFAULT_MAX_PER_ITEM_SCORE,
 } = {}) {
   const safeObjectives = Array.isArray(objectives) ? objectives : [];
   const safeSections = Array.isArray(sections)
@@ -165,6 +222,7 @@ export function summarizeSections({
     safeObjectives,
     allocations,
     objectiveAllocationsWithPlannedCounts,
+    maxPerItemScore,
   );
 
   if (!scoreResult.ok) {
@@ -235,6 +293,16 @@ export function summarizeSections({
       const coverageCount = coverageCounts.get(objectiveId) ?? 1;
       return sum + (scoreResult.objectiveScores.get(objectiveId) ?? 0) / coverageCount;
     }, 0);
+
+    issues.push(
+      ...buildNormalSectionIssues({
+        section,
+        objectiveIds: knownObjectiveIds,
+        coverageCounts,
+        objectiveScores: scoreResult.objectiveScores,
+        maxPerItemScore,
+      }),
+    );
 
     return {
       ...section,

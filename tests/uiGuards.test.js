@@ -33,7 +33,7 @@ const validSection = {
   kind: "normal",
   questionType: "選擇題",
   objectiveIds: ["1-1-1"],
-  plannedCount: 10,
+  plannedCount: 50,
 };
 
 const validGroupSection = {

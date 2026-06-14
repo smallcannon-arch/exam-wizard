@@ -2,6 +2,7 @@ import { allocateScores } from "../core/allocateScores.js";
 
 const DEFAULT_TOTAL_SCORE = 100;
 const DEFAULT_DEVIATION_THRESHOLD = 0.2;
+export const DEFAULT_MAX_PER_ITEM_SCORE = 3;
 const EPSILON = 1e-9;
 
 function toNumber(value, fallback = 0) {
@@ -12,6 +13,28 @@ function toNumber(value, fallback = 0) {
 function toPositiveInteger(value) {
   const number = Number(value);
   return Number.isInteger(number) && number > 0 ? number : null;
+}
+
+export function legalQuestionCounts({
+  objectiveScore,
+  maxPerItem = DEFAULT_MAX_PER_ITEM_SCORE,
+} = {}) {
+  const score = toPositiveInteger(objectiveScore);
+  const maxScore = toPositiveInteger(maxPerItem);
+
+  if (score === null || maxScore === null) {
+    return [];
+  }
+
+  const counts = [];
+
+  for (let count = 1; count <= score; count += 1) {
+    if (score % count === 0 && score / count <= maxScore) {
+      counts.push(count);
+    }
+  }
+
+  return counts;
 }
 
 function getTotalPeriods(objectives) {
@@ -100,6 +123,7 @@ function buildRow({
   allocation,
   suggestedScore,
   deviationThreshold,
+  maxPerItemScore,
 }) {
   const actualInteger = toPositiveInteger(allocation?.actualScore);
   const actualScore = actualInteger ?? toNumber(allocation?.actualScore);
@@ -108,6 +132,10 @@ function buildRow({
       ? null
       : toPositiveInteger(allocation.plannedCount);
   const deviationRate = getDeviationRate(actualScore, suggestedScore);
+  const legalCounts = legalQuestionCounts({
+    objectiveScore: actualInteger,
+    maxPerItem: maxPerItemScore,
+  });
   const warnings = [];
   const errors = [];
 
@@ -127,6 +155,10 @@ function buildRow({
       errors.push(
         `${objective.objectiveId} 共 ${actualInteger} 分，規劃 ${plannedCount} 題無法平分為正整數每題分。`,
       );
+    } else if (actualInteger / plannedCount > maxPerItemScore) {
+      errors.push(
+        `${objective.objectiveId} 共 ${actualInteger} 分，規劃 ${plannedCount} 題時每題 ${actualInteger / plannedCount} 分，超過每題最多 ${maxPerItemScore} 分。`,
+      );
     }
   }
 
@@ -139,8 +171,13 @@ function buildRow({
     suggestedScore,
     actualScore,
     plannedCount,
+    legalQuestionCounts: legalCounts,
+    maxPerItemScore,
     perItemScore:
-      plannedCount !== null && actualInteger !== null && actualInteger % plannedCount === 0
+      plannedCount !== null &&
+      actualInteger !== null &&
+      actualInteger % plannedCount === 0 &&
+      actualInteger / plannedCount <= maxPerItemScore
         ? actualInteger / plannedCount
         : null,
     deviationRate,
@@ -156,6 +193,7 @@ export function validateAllocations({
   allocations = [],
   totalScore = DEFAULT_TOTAL_SCORE,
   deviationThreshold = DEFAULT_DEVIATION_THRESHOLD,
+  maxPerItemScore = DEFAULT_MAX_PER_ITEM_SCORE,
 } = {}) {
   const safeObjectives = Array.isArray(objectives) ? objectives : [];
   const suggestedRows = calculateSuggestedObjectiveScores({
@@ -172,6 +210,7 @@ export function validateAllocations({
       allocation: allocationByObjectiveId.get(String(objective.objectiveId)),
       suggestedScore: suggestedByObjectiveId.get(String(objective.objectiveId)) ?? 0,
       deviationThreshold,
+      maxPerItemScore,
     }),
   );
   const totalActualScore = rows.reduce(

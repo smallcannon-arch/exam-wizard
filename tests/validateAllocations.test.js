@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDefaultObjectiveAllocations,
   calculateSuggestedObjectiveScores,
+  legalQuestionCounts,
   validateAllocations,
 } from "../src/ui/validateAllocations.js";
 
@@ -30,6 +31,21 @@ const objectives = [
 ];
 
 describe("validateAllocations", () => {
+  it("列出整除且每題不超過上限的合法題數", () => {
+    expect(legalQuestionCounts({ objectiveScore: 21 })).toEqual([7, 21]);
+    expect(legalQuestionCounts({ objectiveScore: 9 })).toEqual([3, 9]);
+    expect(legalQuestionCounts({ objectiveScore: 4 })).toEqual([2, 4]);
+    expect(legalQuestionCounts({ objectiveScore: 5 })).toEqual([5]);
+    expect(legalQuestionCounts({ objectiveScore: 100 })).toEqual([50, 100]);
+    expect(legalQuestionCounts({ objectiveScore: 12, maxPerItem: 4 })).toEqual([
+      3,
+      4,
+      6,
+      12,
+    ]);
+    expect(legalQuestionCounts({ objectiveScore: 0 })).toEqual([]);
+  });
+
   it("計算每目標節數比例建議配分", () => {
     const rows = calculateSuggestedObjectiveScores({ objectives, totalScore: 100 });
 
@@ -47,14 +63,14 @@ describe("validateAllocations", () => {
     const result = validateAllocations({
       objectives,
       allocations: [
-        { objectiveId: "1-1-1", actualScore: 20, plannedCount: 4 },
-        { objectiveId: "1-1-2", actualScore: 30, plannedCount: 5 },
-        { objectiveId: "2-1-1", actualScore: 50, plannedCount: 5 },
+        { objectiveId: "1-1-1", actualScore: 20, plannedCount: 10 },
+        { objectiveId: "1-1-2", actualScore: 30, plannedCount: 10 },
+        { objectiveId: "2-1-1", actualScore: 50, plannedCount: 25 },
       ],
     });
 
     expect(result.ok).toBe(true);
-    expect(result.rows.map((row) => row.perItemScore)).toEqual([5, 6, 10]);
+    expect(result.rows.map((row) => row.perItemScore)).toEqual([2, 3, 2]);
   });
 
   it("實際配分合計不是 100 時擋下", () => {
@@ -84,6 +100,22 @@ describe("validateAllocations", () => {
     expect(result.ok).toBe(false);
     expect(result.errors).toContain(
       "1-1-1 共 25 分，規劃 4 題無法平分為正整數每題分。",
+    );
+  });
+
+  it("每題配分超過上限時擋下", () => {
+    const result = validateAllocations({
+      objectives,
+      allocations: [
+        { objectiveId: "1-1-1", actualScore: 20, plannedCount: 4 },
+        { objectiveId: "1-1-2", actualScore: 30, plannedCount: 10 },
+        { objectiveId: "2-1-1", actualScore: 50, plannedCount: 25 },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain(
+      "1-1-1 共 20 分，規劃 4 題時每題 5 分，超過每題最多 3 分。",
     );
   });
 

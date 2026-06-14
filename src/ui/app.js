@@ -47,6 +47,7 @@ import {
 import { getCanonicalSubjectLabel, isChineseSubject } from "./subjects.js";
 import {
   buildDefaultObjectiveAllocations,
+  legalQuestionCounts,
   validateAllocations,
 } from "./validateAllocations.js";
 import {
@@ -221,13 +222,28 @@ function applyAndSave(action) {
 }
 
 function dispatch(action) {
+  const shouldScroll = action?.type === "GO_TO_STEP";
   applyAndSave(action);
   render();
+  if (shouldScroll) {
+    scrollToCurrentStepTop();
+  }
 }
 
 function dispatchMany(actions) {
+  const shouldScroll = actions.some((action) => action?.type === "GO_TO_STEP");
   actions.forEach((action) => applyAndSave(action));
   render();
+  if (shouldScroll) {
+    scrollToCurrentStepTop();
+  }
+}
+
+function scrollToCurrentStepTop() {
+  window.requestAnimationFrame(() => {
+    const target = appRoot.querySelector(".step-panel") ?? appRoot;
+    target.scrollIntoView({ block: "start" });
+  });
 }
 
 function setApiBusy(apiBusy) {
@@ -849,6 +865,18 @@ function formatFormula(unit, allocation, totalPeriods) {
   return `${unit.periodCount} 節 ÷ ${totalPeriods} 節 × 100 ＝ ${rawScore.toFixed(1)} → ${allocation.suggestedScore} 分`;
 }
 
+function formatLegalQuestionCountHint(score) {
+  const counts = legalQuestionCounts({ objectiveScore: score });
+
+  if (counts.length === 0) {
+    return "此配分目前沒有合法題數，請調整為正整數配分。";
+  }
+
+  return `每題≤3分下可出：${counts
+    .map((count) => `${count} 題（每題 ${Number(score) / count} 分）`)
+    .join("、")}`;
+}
+
 function renderAllocationsStep() {
   const plan = getAllocationPlan(state.objectives);
   const totalPeriods = plan.units.reduce((sum, unit) => sum + unit.periodCount, 0);
@@ -938,7 +966,7 @@ function renderAllocationsStep() {
                   <td>
                     ${row.errors.length > 0 ? `<span class="text-error">${escapeHtml(row.errors.join(" "))}</span>` : ""}
                     ${row.warnings.length > 0 ? `<span class="text-warning">${escapeHtml(row.warnings.join(" "))}</span>` : ""}
-                    ${row.errors.length === 0 && row.warnings.length === 0 ? "符合" : ""}
+                    <span class="hint-text">${escapeHtml(formatLegalQuestionCountHint(row.actualScore))}</span>
                   </td>
                 </tr>
               `).join("")}
@@ -1186,13 +1214,25 @@ function renderBlueprintStep() {
   });
   const canProceed = summary.allMatched;
   const warningClass = showBlueprintErrors ? "row-errors" : "hint-text";
+  const sectionProblemCount = summary.sectionSummaries.filter(
+    (section) => section.issues.length > 0,
+  ).length;
+  const summaryMessage =
+    summary.errors.length > 0
+      ? `尚有 ${summary.errors.length} 項大題結構需確認，其中 ${sectionProblemCount} 個大題需要就地修正。`
+      : "";
 
   return `
     <section class="step-panel" aria-labelledby="current-step-title">
       <h2 id="current-step-title">④卷結構規劃</h2>
       <p class="notice notice--inline">先排大題，再把已配分的學習目標歸入大題。大題配分由系統依目標配分自動加總，不需手動填分。</p>
       ${renderAiSectionPlanningPanel()}
-      ${summary.errors.length > 0 ? `<ul class="${warningClass}">${summary.errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul>` : `<p class="success-notice">大題結構已完整，總計 ${formatPrintScore(summary.totalSectionScore)} 分。</p>`}
+      ${summary.errors.length > 0 ? `
+        <div class="${warningClass} blueprint-error-summary">
+          <p>${escapeHtml(summaryMessage)}</p>
+          ${sectionProblemCount > 0 ? `<button class="button button--secondary" type="button" data-action="scroll-first-section-error">查看第一個問題大題</button>` : ""}
+        </div>
+      ` : `<p class="success-notice">大題結構已完整，總計 ${formatPrintScore(summary.totalSectionScore)} 分。</p>`}
       <div class="step-actions">
         <button class="button" type="button" data-action="add-section">新增大題</button>
       </div>
@@ -1201,13 +1241,10 @@ function renderBlueprintStep() {
         const sectionSummary = summary.sectionSummaries.find(
           (entry) => entry.sectionId === section.sectionId,
         );
-        const showSectionIssues =
-          sectionSummary?.issues.length > 0 &&
-          (showBlueprintErrors ||
-            sectionSummary.issues.some((issue) => issue.includes("小題數")));
+        const showSectionIssues = sectionSummary?.issues.length > 0;
 
         return `
-          <section class="blueprint-unit section-planner" data-section-id="${escapeHtml(section.sectionId)}">
+          <section class="blueprint-unit section-planner ${showSectionIssues ? "section-planner--error" : ""}" data-section-id="${escapeHtml(section.sectionId)}" ${showSectionIssues ? "data-section-has-error=\"true\"" : ""}>
             <div class="section-planner__header">
               <h3>${escapeHtml(section.title)}</h3>
               <div class="section-planner__tools">
@@ -3164,6 +3201,7 @@ async function handlePlanSectionsViaApi() {
   const plannedSections = convertPlanSectionsToStateSections({
     planSections: result.plan.sections,
     objectives: state.objectives,
+    objectiveAllocations: getEffectiveObjectiveAllocations(),
   });
 
   if (plannedSections.length === 0) {
@@ -3941,6 +3979,12 @@ async function handleClick(event) {
 
   if (action === "blueprint-next") {
     handleBlueprintNext();
+    return;
+  }
+
+  if (action === "scroll-first-section-error") {
+    const target = appRoot.querySelector("[data-section-has-error=\"true\"]");
+    target?.scrollIntoView({ block: "center" });
     return;
   }
 

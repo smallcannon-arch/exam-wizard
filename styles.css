@@ -391,8 +391,16 @@ textarea:focus-visible {
   gap: 8px;
 }
 
-.checkbox-line input {
+.checkbox-line input,
+.form-grid label.checkbox-line input {
   width: auto;
+}
+
+.form-grid label.checkbox-line {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
 }
 
 .checkbox-fieldset {
@@ -642,6 +650,10 @@ textarea:focus-visible {
   border-radius: var(--radius);
   margin: 0 0 16px;
   padding: 16px;
+}
+
+.section-planner--error {
+  border-color: var(--color-error);
 }
 
 .section-planner__header,

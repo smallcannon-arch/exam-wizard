@@ -1,3 +1,8 @@
+import {
+  DEFAULT_MAX_PER_ITEM_SCORE,
+  legalQuestionCounts,
+} from "./validateAllocations.js";
+
 function toNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
@@ -90,9 +95,19 @@ function buildTargetMaps(blueprint = [], sectionKindById = new Map()) {
   };
 }
 
-export function computeSelectionScores({ objectiveScore, selectedCount } = {}) {
+export function computeSelectionScores({
+  objectiveScore,
+  selectedCount,
+  maxPerItemScore = DEFAULT_MAX_PER_ITEM_SCORE,
+} = {}) {
   const score = toNumber(objectiveScore);
   const count = Number(selectedCount);
+  const legalCounts = legalQuestionCounts({
+    objectiveScore: score,
+    maxPerItem: maxPerItemScore,
+  });
+  const suggestion =
+    legalCounts.length > 0 ? `建議可改選 ${legalCounts.join("、")} 題。` : "";
 
   if (!Number.isInteger(count) || count <= 0) {
     return {
@@ -117,7 +132,16 @@ export function computeSelectionScores({ objectiveScore, selectedCount } = {}) {
       ok: false,
       perItemScore: null,
       selectedTotal: 0,
-      message: `此目標 ${score} 分，選 ${count} 題無法平分為整數，請改選題數或回步驟 ③ 調配分。`,
+      message: `此目標 ${score} 分，選 ${count} 題無法平分為整數，請改選題數或回步驟 ③ 調配分。${suggestion}`,
+    };
+  }
+
+  if (score / count > maxPerItemScore) {
+    return {
+      ok: false,
+      perItemScore: null,
+      selectedTotal: 0,
+      message: `此目標 ${score} 分，選 ${count} 題時每題 ${score / count} 分，超過每題最多 ${maxPerItemScore} 分。${suggestion}`,
     };
   }
 

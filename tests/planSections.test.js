@@ -146,6 +146,10 @@ describe("convertPlanSectionsToStateSections", () => {
   it("轉換後沿用 summarizeSections 由目標配分自動加總", () => {
     const sections = convertPlanSectionsToStateSections({
       objectives,
+      objectiveAllocations: [
+        { objectiveId: "4-1-1", actualScore: 50 },
+        { objectiveId: "4-2-1", actualScore: 50 },
+      ],
       planSections: [
         {
           title: "一、選擇題",
@@ -172,5 +176,59 @@ describe("convertPlanSectionsToStateSections", () => {
     expect(summary.allMatched).toBe(true);
     expect(summary.totalSectionScore).toBe(100);
     expect(summary.sectionSummaries.map((section) => section.score)).toEqual([50, 50]);
+    expect(sections.map((section) => section.plannedCount)).toEqual([25, 25]);
+    expect(sections[0].rationale).toContain("題數已由 6 調整為 25");
+  });
+
+  it("一般大題題數會修正到最接近的合法題數", () => {
+    const sections = convertPlanSectionsToStateSections({
+      objectives,
+      objectiveAllocations: [
+        { objectiveId: "4-1-1", actualScore: 40 },
+        { objectiveId: "4-2-1", actualScore: 60 },
+      ],
+      planSections: [
+        {
+          title: "一、選擇題",
+          kind: "normal",
+          questionType: "選擇題",
+          objectiveIds: ["4-1-1"],
+          plannedCount: 10,
+          groupPlan: null,
+          rationale: "AI 建議題數。",
+        },
+      ],
+    });
+
+    expect(sections[0].plannedCount).toBe(20);
+    expect(sections[0].rationale).toContain("可整除且每題不超過 3 分");
+  });
+
+  it("題組大題不套用一般大題題數修正", () => {
+    const sections = convertPlanSectionsToStateSections({
+      objectives,
+      objectiveAllocations: [{ objectiveId: "4-1-1", actualScore: 40 }],
+      planSections: [
+        {
+          title: "一、題組",
+          kind: "group",
+          questionType: "題組",
+          objectiveIds: ["4-1-1"],
+          plannedCount: 2,
+          groupPlan: {
+            subCount: 2,
+            topicHint: "觀察紀錄",
+            coveredObjectiveIds: ["4-1-1"],
+          },
+          rationale: "題組小題數由題組規則處理。",
+        },
+      ],
+    });
+
+    expect(sections[0]).toMatchObject({
+      kind: "group",
+      plannedCount: 2,
+      subCount: 2,
+    });
   });
 });

@@ -63,6 +63,12 @@ function candidate(itemId, objectiveIds, score, selected = false) {
   };
 }
 
+function candidates(prefix, objectiveIds, count, selected = true) {
+  return Array.from({ length: count }, (_, index) =>
+    candidate(`${prefix}-${String(index + 1).padStart(2, "0")}`, objectiveIds, 1, selected),
+  );
+}
+
 describe("summarizeCandidateSelection", () => {
   it("computeGroupSubScores 可整除均分", () => {
     expect(computeGroupSubScores({ objectiveScore: 20, subItemCount: 4 })).toEqual({
@@ -128,9 +134,9 @@ describe("summarizeCandidateSelection", () => {
   });
 
   it("computeSelectionScores 可判斷整除與除不盡", () => {
-    expect(computeSelectionScores({ objectiveScore: 20, selectedCount: 4 })).toMatchObject({
+    expect(computeSelectionScores({ objectiveScore: 20, selectedCount: 10 })).toMatchObject({
       ok: true,
-      perItemScore: 5,
+      perItemScore: 2,
       selectedTotal: 20,
     });
     expect(computeSelectionScores({ objectiveScore: 20, selectedCount: 3 })).toMatchObject({
@@ -139,19 +145,26 @@ describe("summarizeCandidateSelection", () => {
     });
   });
 
+  it("一般題每題配分超過 3 分時會擋下", () => {
+    const result = computeSelectionScores({ objectiveScore: 20, selectedCount: 4 });
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("超過每題最多 3 分");
+  });
+
   it("剛好選滿時 allMatched 為 true 並產出正式題目", () => {
     const result = summarizeCandidateSelection({
       objectives,
       blueprint,
       candidatePool: [
-        candidate("C-01", ["1-1-1"], 20, true),
-        candidate("C-02", ["1-1-2"], 10, true),
+        ...candidates("C-A", ["1-1-1"], 10),
+        ...candidates("C-B", ["1-1-2"], 5),
       ],
     });
 
     expect(result.allMatched).toBe(true);
     expect(result.errors).toEqual([]);
-    expect(result.selectedItems.map((item) => item.itemId)).toEqual(["A-01", "A-02"]);
+    expect(result.selectedItems.map((item) => item.itemId).slice(0, 2)).toEqual(["A-01", "A-02"]);
     expect(result.totalSelectedScore).toBe(30);
   });
 
@@ -195,13 +208,14 @@ describe("summarizeCandidateSelection", () => {
   });
 
   it("跨目標題依各目標每題分合併正式題分", () => {
+    const crossItem = candidate("C-X", ["1-1-1", "1-1-2"], 1, true);
     const result = summarizeCandidateSelection({
       objectives,
       blueprint,
       candidatePool: [
-        candidate("C-01", ["1-1-1"], 15, true),
-        candidate("C-02", ["1-1-1", "1-1-2"], 10, true),
-        candidate("C-03", ["1-1-2"], 5, true),
+        crossItem,
+        ...candidates("C-A", ["1-1-1"], 9),
+        ...candidates("C-B", ["1-1-2"], 4),
       ],
     });
 
@@ -210,7 +224,7 @@ describe("summarizeCandidateSelection", () => {
       20,
       10,
     ]);
-    expect(result.selectedItems.find((item) => item.question === "題目 C-02").score).toBe(15);
+    expect(result.selectedItems.find((item) => item.question === "題目 C-X").score).toBe(4);
   });
 
   it("空備選池時回傳未完成", () => {

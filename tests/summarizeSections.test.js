@@ -41,7 +41,7 @@ function section(sectionId, objectiveIds, extra = {}) {
     kind: "normal",
     questionType: "選擇題",
     objectiveIds,
-    plannedCount: 3,
+    plannedCount: 10,
     ...extra,
   };
 }
@@ -51,7 +51,7 @@ describe("summarizeSections", () => {
     const result = summarizeSections({
       sections: [
         section("S1", ["1-1-1", "1-1-2"]),
-        section("S2", ["2-1-1"], { questionType: "應用題" }),
+        section("S2", ["2-1-1"], { questionType: "應用題", plannedCount: 25 }),
       ],
       objectives,
       allocations,
@@ -66,15 +66,20 @@ describe("summarizeSections", () => {
   it("一個目標跨多大題時配分平均分攤且總計仍為 100", () => {
     const result = summarizeSections({
       sections: [
-        section("S1", ["1-1-1", "1-1-2"]),
-        section("S2", ["1-1-1", "2-1-1"], { questionType: "應用題" }),
+        section("S1", ["1-1-1", "1-1-2"], { plannedCount: 25 }),
+        section("S2", ["1-1-1", "2-1-1"], { questionType: "應用題", plannedCount: 25 }),
       ],
       objectives,
       allocations,
+      objectiveAllocations: [
+        { objectiveId: "1-1-1", actualScore: 50 },
+        { objectiveId: "1-1-2", actualScore: 25 },
+        { objectiveId: "2-1-1", actualScore: 25 },
+      ],
     });
 
     expect(result.allMatched).toBe(true);
-    expect(result.sectionSummaries.map((entry) => entry.score)).toEqual([40, 60]);
+    expect(result.sectionSummaries.map((entry) => entry.score)).toEqual([50, 50]);
     expect(result.objectiveSummaries.find((entry) => entry.objectiveId === "1-1-1").coverageCount).toBe(2);
   });
 
@@ -129,6 +134,22 @@ describe("summarizeSections", () => {
     expect(result.errors.some((error) => error.includes("無法平分"))).toBe(true);
   });
 
+  it("一般大題每題配分超過 3 分時在該大題列出錯誤", () => {
+    const result = summarizeSections({
+      sections: [section("S1", ["1-1-1"], { plannedCount: 4 })],
+      objectives,
+      allocations,
+      objectiveAllocations: [
+        { objectiveId: "1-1-1", actualScore: 20 },
+        { objectiveId: "1-1-2", actualScore: 30 },
+        { objectiveId: "2-1-1", actualScore: 50 },
+      ],
+    });
+
+    expect(result.allMatched).toBe(false);
+    expect(result.sectionSummaries[0].issues[0]).toContain("超過每題最多 3 分");
+  });
+
   it("題組大題納入配分加總與目標覆蓋計算", () => {
     const result = summarizeSections({
       sections: [
@@ -139,7 +160,7 @@ describe("summarizeSections", () => {
           subCount: 3,
           plannedCount: 3,
         }),
-        section("S2", ["2-1-1"], { questionType: "應用題" }),
+        section("S2", ["2-1-1"], { questionType: "應用題", plannedCount: 25 }),
       ],
       objectives,
       allocations,
@@ -211,7 +232,7 @@ describe("summarizeSections", () => {
     const summary = summarizeSections({
       sections: [
         section("S1", ["1-1-1", "1-1-2"]),
-        section("S2", ["2-1-1"], { questionType: "應用題" }),
+        section("S2", ["2-1-1"], { questionType: "應用題", plannedCount: 25 }),
       ],
       objectives,
       allocations,
