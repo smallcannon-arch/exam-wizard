@@ -5,7 +5,7 @@ import { buildItemGenerationPrompt, parseItemsJson } from "../core/buildPrompt.j
 import { validateObjective } from "../core/schemas.js";
 import { isApiAvailable } from "./apiConfig.js";
 import {
-  extractObjectivesFromFile,
+  extractObjectivesFromFiles,
   extractObjectivesViaApi,
   generateGroupViaApi,
   generateItemsViaApi,
@@ -27,7 +27,7 @@ import {
   formatFileSize,
   readFileAsDataUrl,
   stripBase64DataUrl,
-  validateExtractionFile,
+  validateExtractionFiles,
 } from "./fileUpload.js";
 import { renumberObjectives } from "./renumberObjectives.js";
 import {
@@ -88,8 +88,7 @@ let tsvErrors = [];
 let tsvNotices = [];
 let extractionMaterialText = "";
 let extractionApiError = "";
-let extractionSelectedFile = null;
-let extractionSelectedFileMeta = null;
+let extractionSelectedFiles = [];
 let extractionFileError = "";
 let objectiveImportSuccess = "";
 let renumberDialogOpen = false;
@@ -588,12 +587,32 @@ function renderAiExtractionPanel() {
   const result = getExtractionPromptResult();
   const apiAvailable = isApiAvailable();
   const apiBusy = state.apiBusy === true;
-  const fileValidation = extractionSelectedFile
-    ? validateExtractionFile(extractionSelectedFile)
+  const totalFileBytes = extractionSelectedFiles.reduce(
+    (sum, file) => sum + (Number(file.size) || 0),
+    0,
+  );
+  const fileValidation = extractionSelectedFiles.length > 0
+    ? validateExtractionFiles(extractionSelectedFiles)
     : null;
-  const fileLabel = extractionSelectedFileMeta
-    ? `${extractionSelectedFileMeta.name}（${formatFileSize(extractionSelectedFileMeta.size)}）`
-    : "尚未選擇檔案";
+  const fileStatus = extractionFileError ||
+    (fileValidation?.ok === false
+      ? fileValidation.error
+      : extractionSelectedFiles.length > 0
+        ? `已選 ${extractionSelectedFiles.length} 個檔案，總大小 ${formatFileSize(totalFileBytes)}。`
+        : "尚未選擇檔案");
+  const fileListHtml =
+    extractionSelectedFiles.length > 0
+      ? `
+        <ul class="file-list" aria-label="已選檔案">
+          ${extractionSelectedFiles.map((file, index) => `
+            <li>
+              <span>${escapeHtml(file.name || `檔案 ${index + 1}`)}（${escapeHtml(formatFileSize(file.size))}）</span>
+              <button class="button button--secondary button--small" type="button" data-action="remove-extraction-file" data-file-index="${index}" ${apiBusy ? "disabled" : ""}>移除</button>
+            </li>
+          `).join("")}
+        </ul>
+      `
+      : "";
 
   return `
     <dialog class="modal-dialog ai-extraction-panel" data-objective-dialog="ai-extraction" aria-labelledby="ai-extraction-title">
@@ -607,11 +626,12 @@ function renderAiExtractionPanel() {
             <h4>上傳檔案（預設）</h4>
             <p class="hint-text">可直接上傳課本或教案的 PDF，或拍照／截圖（JPG、PNG、WebP）。系統會讀取內容並擷取學習目標。結果僅為草稿，匯入後請逐筆核對。</p>
             <label class="file-drop-zone" data-extraction-file-drop>
-              <span>選擇或拖放 PDF / JPG / PNG / WebP</span>
-              <input type="file" data-extraction-file accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp">
+              <span>選擇或拖放 PDF / JPG / PNG / WebP（可多選）</span>
+              <input type="file" data-extraction-file multiple accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp">
             </label>
+            ${fileListHtml}
             <p class="${fileValidation?.ok === false || extractionFileError ? "field-error" : "hint-text"}">
-              ${escapeHtml(extractionFileError || (fileValidation?.ok === false ? fileValidation.error : fileLabel))}
+              ${escapeHtml(fileStatus)}
             </p>
             ${extractionApiError ? `<p class="field-error">${escapeHtml(extractionApiError)} 可改用下方其他方式。</p>` : ""}
             ${apiBusy ? `<p class="notice notice--inline">讀取檔案並擷取中，請稍候…</p>` : ""}
@@ -2520,8 +2540,7 @@ function closeObjectiveDialog(dialogName) {
     extractionCopyStatus = "";
     extractionApiError = "";
     extractionFileError = "";
-    extractionSelectedFile = null;
-    extractionSelectedFileMeta = null;
+    extractionSelectedFiles = [];
   }
 }
 
@@ -2850,23 +2869,35 @@ async function handleStartApiExtraction() {
   });
 }
 
-function setExtractionFile(file) {
-  extractionSelectedFile = file ?? null;
-  extractionSelectedFileMeta = file
-    ? {
-        name: file.name,
-        size: file.size,
-        type: file.type,
-      }
-    : null;
-  extractionFileError = "";
-  extractionApiError = "";
+function addExtractionFiles(files) {
+  const nextFiles = Array.from(files ?? []);
 
-  if (!file) {
+  if (nextFiles.length === 0) {
     return;
   }
 
-  const validation = validateExtractionFile(file);
+  extractionSelectedFiles = [...extractionSelectedFiles, ...nextFiles];
+  extractionFileError = "";
+  extractionApiError = "";
+  const validation = validateExtractionFiles(extractionSelectedFiles);
+
+  if (!validation.ok) {
+    extractionFileError = validation.error;
+  }
+}
+
+function removeExtractionFile(index) {
+  extractionSelectedFiles = extractionSelectedFiles.filter(
+    (_file, fileIndex) => fileIndex !== index,
+  );
+  extractionFileError = "";
+  extractionApiError = "";
+
+  if (extractionSelectedFiles.length === 0) {
+    return;
+  }
+
+  const validation = validateExtractionFiles(extractionSelectedFiles);
 
   if (!validation.ok) {
     extractionFileError = validation.error;
@@ -2888,8 +2919,7 @@ function applyApiObjectivesResult(result, successMessage) {
   objectiveImportSuccess = successMessage;
   extractionApiError = "";
   extractionFileError = "";
-  extractionSelectedFile = null;
-  extractionSelectedFileMeta = null;
+  extractionSelectedFiles = [];
   aiExtractionPanelOpen = false;
   clearRenumberFeedback();
   setApiBusy(false);
@@ -2905,7 +2935,7 @@ async function handleStartFileExtraction() {
     return;
   }
 
-  const validation = validateExtractionFile(extractionSelectedFile);
+  const validation = validateExtractionFiles(extractionSelectedFiles);
 
   if (!validation.ok) {
     extractionFileError = validation.error;
@@ -2920,11 +2950,17 @@ async function handleStartFileExtraction() {
   setApiBusy(true);
   render();
 
-  let fileData;
+  const filesPayload = [];
 
   try {
-    const dataUrl = await readFileAsDataUrl(extractionSelectedFile);
-    fileData = stripBase64DataUrl(dataUrl);
+    for (const fileEntry of validation.files) {
+      const dataUrl = await readFileAsDataUrl(fileEntry.file);
+      const fileData = stripBase64DataUrl(dataUrl);
+      filesPayload.push({
+        mimeType: fileEntry.mimeType,
+        data: fileData.data,
+      });
+    }
   } catch {
     extractionFileError = "無法讀取檔案，請重新選擇後再試。";
     setApiBusy(false);
@@ -2932,12 +2968,9 @@ async function handleStartFileExtraction() {
     return;
   }
 
-  const result = await extractObjectivesFromFile({
+  const result = await extractObjectivesFromFiles({
     project: state.project,
-    file: {
-      mimeType: validation.mimeType,
-      data: fileData.data,
-    },
+    files: filesPayload,
   });
 
   if (!result.ok) {
@@ -3795,6 +3828,12 @@ async function handleClick(event) {
     return;
   }
 
+  if (action === "remove-extraction-file") {
+    removeExtractionFile(Number(actionButton.dataset.fileIndex));
+    render();
+    return;
+  }
+
   if (action === "suggest-types-api") {
     await handleSuggestTypesViaApi();
     return;
@@ -4017,7 +4056,7 @@ function handleInput(event) {
   }
 
   if (extractionFileInput) {
-    setExtractionFile(extractionFileInput.files?.[0] ?? null);
+    addExtractionFiles(extractionFileInput.files);
     render();
     return;
   }
@@ -4120,7 +4159,7 @@ function handleDrop(event) {
   }
 
   event.preventDefault();
-  setExtractionFile(event.dataTransfer?.files?.[0] ?? null);
+  addExtractionFiles(event.dataTransfer?.files);
   render();
 }
 

@@ -4,6 +4,7 @@ import {
   getSupportedMimeType,
   stripBase64DataUrl,
   validateExtractionFile,
+  validateExtractionFiles,
 } from "../src/ui/fileUpload.js";
 
 describe("validateExtractionFile", () => {
@@ -41,6 +42,42 @@ describe("validateExtractionFile", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toContain("不支援");
     expect(result.error).toContain("另存成 PDF");
+  });
+});
+
+describe("validateExtractionFiles", () => {
+  it("接受多個支援格式並加總大小", () => {
+    const result = validateExtractionFiles([
+      { name: "lesson.pdf", type: "application/pdf", size: 1024 },
+      { name: "scan.png", type: "image/png", size: 2048 },
+    ]);
+
+    expect(result.ok).toBe(true);
+    expect(result.files).toHaveLength(2);
+    expect(result.totalBytes).toBe(3072);
+  });
+
+  it("總大小超過上限時回可讀錯誤", () => {
+    const result = validateExtractionFiles(
+      [
+        { name: "a.pdf", type: "application/pdf", size: 8 },
+        { name: "b.pdf", type: "application/pdf", size: 8 },
+      ],
+      10,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("檔案總和過大");
+  });
+
+  it("多檔中有不支援格式時回錯誤", () => {
+    const result = validateExtractionFiles([
+      { name: "lesson.pdf", type: "application/pdf", size: 1024 },
+      { name: "notes.docx", type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", size: 1024 },
+    ]);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("不支援");
   });
 });
 

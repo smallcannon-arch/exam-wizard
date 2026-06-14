@@ -266,6 +266,17 @@ export function extractObjectivesFromFile({ project, file }) {
   );
 }
 
+export function extractObjectivesFromFiles({ project, files }) {
+  return postApi(
+    "/extract-objectives",
+    {
+      project,
+      files,
+    },
+    "objectives",
+  );
+}
+
 export function generateItemsViaApi({
   project,
   objectives,

@@ -77,6 +77,57 @@ export function validateExtractionFile(file, maxBytes = MAX_EXTRACTION_FILE_BYTE
   };
 }
 
+export function validateExtractionFiles(files, maxBytes = MAX_EXTRACTION_FILE_BYTES) {
+  const fileList = Array.from(files ?? []);
+
+  if (fileList.length === 0) {
+    return {
+      ok: false,
+      error: "請先選擇要上傳的 PDF 或圖片檔。",
+      files: [],
+      totalBytes: 0,
+    };
+  }
+
+  const normalizedFiles = [];
+  let totalBytes = 0;
+
+  for (const file of fileList) {
+    const validation = validateExtractionFile(file, Number.MAX_SAFE_INTEGER);
+
+    if (!validation.ok) {
+      return {
+        ...validation,
+        files: normalizedFiles,
+        totalBytes,
+      };
+    }
+
+    normalizedFiles.push({
+      file,
+      mimeType: validation.mimeType,
+      name: file.name,
+      size: Number(file.size) || 0,
+    });
+    totalBytes += Number(file.size) || 0;
+  }
+
+  if (totalBytes > maxBytes) {
+    return {
+      ok: false,
+      error: "檔案總和過大，請減少檔案或分批上傳，或改用貼上文字。",
+      files: normalizedFiles,
+      totalBytes,
+    };
+  }
+
+  return {
+    ok: true,
+    files: normalizedFiles,
+    totalBytes,
+  };
+}
+
 export function stripBase64DataUrl(data) {
   const value = String(data ?? "").trim();
   const match = value.match(/^data:([^;,]+);base64,(.*)$/is);

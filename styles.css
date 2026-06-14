@@ -117,6 +117,11 @@ textarea:focus-visible {
   color: var(--color-primary);
 }
 
+.button--small {
+  min-height: 34px;
+  padding: 4px 10px;
+}
+
 .app-main {
   flex: 1;
   padding: 24px 0 32px;
@@ -394,6 +399,25 @@ textarea:focus-visible {
 
 .file-drop-zone input {
   background: var(--color-surface);
+}
+
+.file-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 10px 0 8px;
+  padding: 0;
+}
+
+.file-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  padding: 8px 10px;
 }
 
 .mode-selector {
