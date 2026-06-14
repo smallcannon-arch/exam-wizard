@@ -5,6 +5,7 @@ import { buildItemGenerationPrompt, parseItemsJson } from "../core/buildPrompt.j
 import { validateObjective } from "../core/schemas.js";
 import { isApiAvailable } from "./apiConfig.js";
 import {
+  extractObjectivesFromFile,
   extractObjectivesViaApi,
   generateGroupViaApi,
   generateItemsViaApi,
@@ -22,6 +23,12 @@ import {
   normalizeProjectDraftData,
   validateProjectDraftData,
 } from "./projectDraft.js";
+import {
+  formatFileSize,
+  readFileAsDataUrl,
+  stripBase64DataUrl,
+  validateExtractionFile,
+} from "./fileUpload.js";
 import { renumberObjectives } from "./renumberObjectives.js";
 import {
   applyCandidateSelection,
@@ -81,6 +88,9 @@ let tsvErrors = [];
 let tsvNotices = [];
 let extractionMaterialText = "";
 let extractionApiError = "";
+let extractionSelectedFile = null;
+let extractionSelectedFileMeta = null;
+let extractionFileError = "";
 let objectiveImportSuccess = "";
 let renumberDialogOpen = false;
 let renumberSuccess = "";
@@ -578,6 +588,12 @@ function renderAiExtractionPanel() {
   const result = getExtractionPromptResult();
   const apiAvailable = isApiAvailable();
   const apiBusy = state.apiBusy === true;
+  const fileValidation = extractionSelectedFile
+    ? validateExtractionFile(extractionSelectedFile)
+    : null;
+  const fileLabel = extractionSelectedFileMeta
+    ? `${extractionSelectedFileMeta.name}（${formatFileSize(extractionSelectedFileMeta.size)}）`
+    : "尚未選擇檔案";
 
   return `
     <dialog class="modal-dialog ai-extraction-panel" data-objective-dialog="ai-extraction" aria-labelledby="ai-extraction-title">
@@ -586,9 +602,38 @@ function renderAiExtractionPanel() {
         <button class="icon-button" type="button" data-action="close-objective-dialog" aria-label="關閉">×</button>
       </header>
       <div class="modal-dialog__body">
-        <section class="api-mode-block">
-          <h4>手動擷取（可上傳 PDF）</h4>
-          <p class="hint-text">可在 Claude / Gemini 等 AI 直接上傳課本或教案 PDF，貼上本指令擷取學習目標。學習目標文字請照課本／教案原文逐字擷取，不得改寫、潤飾或自行歸納。</p>
+        ${apiAvailable ? `
+          <section class="api-mode-block">
+            <h4>上傳檔案（預設）</h4>
+            <p class="hint-text">可直接上傳課本或教案的 PDF，或拍照／截圖（JPG、PNG、WebP）。系統會讀取內容並擷取學習目標。結果僅為草稿，匯入後請逐筆核對。</p>
+            <label class="file-drop-zone" data-extraction-file-drop>
+              <span>選擇或拖放 PDF / JPG / PNG / WebP</span>
+              <input type="file" data-extraction-file accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp">
+            </label>
+            <p class="${fileValidation?.ok === false || extractionFileError ? "field-error" : "hint-text"}">
+              ${escapeHtml(extractionFileError || (fileValidation?.ok === false ? fileValidation.error : fileLabel))}
+            </p>
+            ${extractionApiError ? `<p class="field-error">${escapeHtml(extractionApiError)} 可改用下方其他方式。</p>` : ""}
+            ${apiBusy ? `<p class="notice notice--inline">讀取檔案並擷取中，請稍候…</p>` : ""}
+            <div class="step-actions">
+              <button class="button" type="button" data-action="start-file-extraction" ${apiBusy ? "disabled" : ""}>開始擷取</button>
+            </div>
+          </section>
+          <details class="manual-fallback">
+            <summary>或：貼上純文字一鍵擷取（不支援 PDF）</summary>
+            <p class="hint-text">這條路徑只適合貼入純文字教案或課文重點；若資料在 PDF 或圖片中，請使用上方檔案上傳。</p>
+            <label>
+              <span>教材文字</span>
+              <textarea data-extraction-material-text rows="8" placeholder="可貼入教案中的學習目標段落、課文重點或教師整理摘要。">${escapeHtml(extractionMaterialText)}</textarea>
+            </label>
+            <div class="step-actions">
+              <button class="button button--secondary" type="button" data-action="start-api-extraction" ${apiBusy ? "disabled" : ""}>用文字擷取</button>
+            </div>
+          </details>
+        ` : `<p class="notice notice--inline">目前一鍵擷取未啟用，請使用下方手動貼回。</p>`}
+        <details class="manual-fallback" ${apiAvailable ? "" : "open"}>
+          <summary>或：手動貼回（備援）</summary>
+          <p class="hint-text">可在 Claude / Gemini 等 AI 直接上傳課本或教案 PDF，貼上本指令擷取學習目標，再把 AI 回覆貼回本系統。</p>
           <ol class="instruction-list">
             <li>複製下方指令。</li>
             <li>開啟 Claude 或 Gemini，上傳教案 PDF 並貼上指令。</li>
@@ -596,7 +641,7 @@ function renderAiExtractionPanel() {
           </ol>
           ${result.ok ? `
             <div class="prompt-toolbar">
-              <button class="button" type="button" data-action="copy-extraction-prompt">複製指令</button>
+              <button class="button button--secondary" type="button" data-action="copy-extraction-prompt">複製指令</button>
               <span class="copy-status" data-extraction-copy-status>${escapeHtml(extractionCopyStatus)}</span>
             </div>
             <pre class="prompt-output" data-extraction-prompt-output tabindex="0">${escapeHtml(result.prompt)}</pre>
@@ -609,24 +654,9 @@ function renderAiExtractionPanel() {
           ${tsvNotices.length > 0 ? `<div class="notice notice--inline"><strong>AI 註記</strong><ul>${tsvNotices.map((noticeItem) => `<li>${escapeHtml(noticeItem)}</li>`).join("")}</ul></div>` : ""}
           <p class="notice notice--inline">AI 擷取結果僅為草稿，匯入後請逐筆核對目標文字與節數，特別是標註「平均分配」的節數。</p>
           <div class="step-actions">
-            <button class="button" type="button" data-action="import-objectives">匯入</button>
+            <button class="button button--secondary" type="button" data-action="import-objectives">匯入貼回資料</button>
           </div>
-        </section>
-        ${apiAvailable ? `
-          <details class="manual-fallback">
-            <summary>或：貼上純文字一鍵擷取（不支援 PDF）</summary>
-            <p class="hint-text">這條路徑只適合貼入純文字教案或課文重點；若資料在 PDF 中，請使用上方手動擷取流程。</p>
-            <label>
-              <span>教材文字</span>
-              <textarea data-extraction-material-text rows="8" placeholder="可貼入教案中的學習目標段落、課文重點或教師整理摘要。">${escapeHtml(extractionMaterialText)}</textarea>
-            </label>
-            ${extractionApiError ? `<p class="field-error">${escapeHtml(extractionApiError)} 可改用上方手動擷取。</p>` : ""}
-            ${apiBusy ? `<p class="notice notice--inline">擷取中，請稍候…</p>` : ""}
-            <div class="step-actions">
-              <button class="button" type="button" data-action="start-api-extraction" ${apiBusy ? "disabled" : ""}>開始擷取</button>
-            </div>
-          </details>
-        ` : ""}
+        </details>
       </div>
     </dialog>
   `;
@@ -2489,6 +2519,9 @@ function closeObjectiveDialog(dialogName) {
     aiExtractionPanelOpen = false;
     extractionCopyStatus = "";
     extractionApiError = "";
+    extractionFileError = "";
+    extractionSelectedFile = null;
+    extractionSelectedFileMeta = null;
   }
 }
 
@@ -2815,6 +2848,112 @@ async function handleStartApiExtraction() {
     type: "SET_OBJECTIVES",
     payload: [...existing, ...result.objectives],
   });
+}
+
+function setExtractionFile(file) {
+  extractionSelectedFile = file ?? null;
+  extractionSelectedFileMeta = file
+    ? {
+        name: file.name,
+        size: file.size,
+        type: file.type,
+      }
+    : null;
+  extractionFileError = "";
+  extractionApiError = "";
+
+  if (!file) {
+    return;
+  }
+
+  const validation = validateExtractionFile(file);
+
+  if (!validation.ok) {
+    extractionFileError = validation.error;
+  }
+}
+
+function applyApiObjectivesResult(result, successMessage) {
+  const validationErrors = validateObjectivesForNext(result.objectives);
+
+  if (validationErrors.length > 0) {
+    extractionApiError = validationErrors[0];
+    return false;
+  }
+
+  const existing = state.objectives.filter((objective) => !isBlankObjective(objective));
+  tsvErrors = [];
+  tsvNotices = result.notices ?? [];
+  showObjectiveErrors = false;
+  objectiveImportSuccess = successMessage;
+  extractionApiError = "";
+  extractionFileError = "";
+  extractionSelectedFile = null;
+  extractionSelectedFileMeta = null;
+  aiExtractionPanelOpen = false;
+  clearRenumberFeedback();
+  setApiBusy(false);
+  dispatch({
+    type: "SET_OBJECTIVES",
+    payload: [...existing, ...result.objectives],
+  });
+  return true;
+}
+
+async function handleStartFileExtraction() {
+  if (state.apiBusy) {
+    return;
+  }
+
+  const validation = validateExtractionFile(extractionSelectedFile);
+
+  if (!validation.ok) {
+    extractionFileError = validation.error;
+    extractionApiError = "";
+    render();
+    return;
+  }
+
+  extractionFileError = "";
+  extractionApiError = "";
+  objectiveImportSuccess = "";
+  setApiBusy(true);
+  render();
+
+  let fileData;
+
+  try {
+    const dataUrl = await readFileAsDataUrl(extractionSelectedFile);
+    fileData = stripBase64DataUrl(dataUrl);
+  } catch {
+    extractionFileError = "無法讀取檔案，請重新選擇後再試。";
+    setApiBusy(false);
+    render();
+    return;
+  }
+
+  const result = await extractObjectivesFromFile({
+    project: state.project,
+    file: {
+      mimeType: validation.mimeType,
+      data: fileData.data,
+    },
+  });
+
+  if (!result.ok) {
+    extractionApiError = result.error;
+    setApiBusy(false);
+    render();
+    return;
+  }
+
+  if (!applyApiObjectivesResult(
+    result,
+    `已擷取並匯入 ${result.objectives.length} 筆`,
+  )) {
+    setApiBusy(false);
+    render();
+  }
 }
 
 function mergeTypeSuggestionsIntoBlueprintRows(suggestions) {
@@ -3513,6 +3652,7 @@ async function handleClick(event) {
     aiExtractionPanelOpen = dialogName === "ai-extraction";
     tsvErrors = [];
     extractionApiError = "";
+    extractionFileError = "";
     extractionCopyStatus = "";
     render();
     return;
@@ -3650,6 +3790,11 @@ async function handleClick(event) {
     return;
   }
 
+  if (action === "start-file-extraction") {
+    await handleStartFileExtraction();
+    return;
+  }
+
   if (action === "suggest-types-api") {
     await handleSuggestTypesViaApi();
     return;
@@ -3715,6 +3860,7 @@ function handleInput(event) {
   const sectionObjectiveField = event.target.closest("[data-section-objective]");
   const blueprintField = event.target.closest("[data-blueprint-field], [data-blueprint-type]");
   const tsvInput = event.target.closest("[data-tsv-input]");
+  const extractionFileInput = event.target.closest("[data-extraction-file]");
   const extractionMaterialInput = event.target.closest("[data-extraction-material-text]");
   const materialTextInput = event.target.closest("[data-material-text]");
   const candidatesPerObjectiveInput = event.target.closest("[data-candidates-per-objective]");
@@ -3870,6 +4016,12 @@ function handleInput(event) {
     return;
   }
 
+  if (extractionFileInput) {
+    setExtractionFile(extractionFileInput.files?.[0] ?? null);
+    render();
+    return;
+  }
+
   if (extractionMaterialInput) {
     extractionMaterialText = extractionMaterialInput.value;
     extractionApiError = "";
@@ -3954,6 +4106,24 @@ function handleDialogClose(event) {
   }
 }
 
+function handleDragOver(event) {
+  if (!event.target.closest("[data-extraction-file-drop]")) {
+    return;
+  }
+
+  event.preventDefault();
+}
+
+function handleDrop(event) {
+  if (!event.target.closest("[data-extraction-file-drop]")) {
+    return;
+  }
+
+  event.preventDefault();
+  setExtractionFile(event.dataTransfer?.files?.[0] ?? null);
+  render();
+}
+
 loadDraft();
 syncProjectDraftFromState();
 render();
@@ -3962,3 +4132,5 @@ appRoot.addEventListener("input", handleInput);
 appRoot.addEventListener("change", handleInput);
 appRoot.addEventListener("submit", handleSubmit);
 appRoot.addEventListener("close", handleDialogClose, true);
+appRoot.addEventListener("dragover", handleDragOver);
+appRoot.addEventListener("drop", handleDrop);

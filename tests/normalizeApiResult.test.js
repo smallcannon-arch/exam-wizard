@@ -66,6 +66,39 @@ describe("normalizeApiResult", () => {
     });
   });
 
+  it("FILE_TOO_LARGE 保留後端檔案過大訊息", () => {
+    const result = normalizeApiResult(
+      {
+        ok: false,
+        code: "FILE_TOO_LARGE",
+        error: "檔案過大（上限約 18MB），請改傳單一課次/單元的 PDF 或截圖，或改用貼上文字。",
+      },
+      "objectives",
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "檔案過大（上限約 18MB），請改傳單一課次/單元的 PDF 或截圖，或改用貼上文字。",
+    });
+  });
+
+  it("UNSUPPORTED_FILE_TYPE 保留不支援格式訊息", () => {
+    const result = normalizeApiResult(
+      {
+        ok: false,
+        code: "UNSUPPORTED_FILE_TYPE",
+        error: "不支援的檔案格式，請改傳 PDF、JPG、PNG 或 WebP。",
+      },
+      "objectives",
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: "不支援的檔案格式，請改傳 PDF、JPG、PNG 或 WebP。",
+    });
+  });
+
   it("缺 objectives 欄位時回傳可讀錯誤", () => {
     const result = normalizeApiResult({ ok: true }, "objectives");
 

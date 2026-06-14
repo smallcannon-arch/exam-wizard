@@ -255,6 +255,17 @@ export function extractObjectivesViaApi({ project, materialText }) {
   );
 }
 
+export function extractObjectivesFromFile({ project, file }) {
+  return postApi(
+    "/extract-objectives",
+    {
+      project,
+      file,
+    },
+    "objectives",
+  );
+}
+
 export function generateItemsViaApi({
   project,
   objectives,

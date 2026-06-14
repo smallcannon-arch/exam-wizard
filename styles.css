@@ -376,6 +376,26 @@ textarea:focus-visible {
   margin: 0 0 8px;
 }
 
+.file-drop-zone {
+  display: block;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius);
+  background: #fbfaf7;
+  margin: 12px 0 8px;
+  padding: 16px;
+}
+
+.file-drop-zone span {
+  display: block;
+  color: var(--color-primary);
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.file-drop-zone input {
+  background: var(--color-surface);
+}
+
 .mode-selector {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
