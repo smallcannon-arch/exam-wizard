@@ -111,6 +111,21 @@ function isValidGroup(group) {
   );
 }
 
+function isValidSectionPlan(section) {
+  return (
+    isPlainObject(section) &&
+    typeof section.title === "string" &&
+    (section.kind === "normal" || section.kind === "group") &&
+    typeof section.questionType === "string" &&
+    Array.isArray(section.objectiveIds) &&
+    section.objectiveIds.every((objectiveId) => typeof objectiveId === "string") &&
+    typeof section.plannedCount === "number" &&
+    Number.isFinite(section.plannedCount) &&
+    (section.groupPlan === null || isPlainObject(section.groupPlan)) &&
+    typeof section.rationale === "string"
+  );
+}
+
 export function normalizeApiResult(raw, kind) {
   if (!isPlainObject(raw)) {
     return createError("AI 回覆格式不正確，請改用手動貼回。");
@@ -136,6 +151,29 @@ export function normalizeApiResult(raw, kind) {
     return {
       ok: true,
       group: raw.group,
+    };
+  }
+
+  if (kind === "sectionPlan") {
+    const sections = raw.plan?.sections;
+
+    if (!Array.isArray(sections)) {
+      return createError("AI 回覆缺少大題規劃草案，請重試或手動排大題。");
+    }
+
+    const invalidIndex = sections.findIndex((section) => !isValidSectionPlan(section));
+
+    if (invalidIndex >= 0) {
+      return createError(
+        `AI 回覆第 ${invalidIndex + 1} 個大題格式不完整，請重試或手動排大題。`,
+      );
+    }
+
+    return {
+      ok: true,
+      plan: {
+        sections,
+      },
     };
   }
 
@@ -307,6 +345,18 @@ export function suggestTypesViaApi({ project, objectives }) {
       objectives,
     },
     "typeSuggestions",
+  );
+}
+
+export function planSectionsViaApi({ project, objectives, preferences }) {
+  return postApi(
+    "/plan-sections",
+    {
+      project,
+      objectives,
+      preferences,
+    },
+    "sectionPlan",
   );
 }
 

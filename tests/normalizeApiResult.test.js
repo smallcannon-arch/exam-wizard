@@ -224,3 +224,56 @@ describe("normalizeApiResult 題組生成", () => {
     expect(result.error).toContain("題組格式");
   });
 });
+
+describe("normalizeApiResult 整卷規劃", () => {
+  const section = {
+    title: "一、選擇題",
+    kind: "normal",
+    questionType: "選擇題",
+    objectiveIds: ["4-1-1"],
+    plannedCount: 6,
+    groupPlan: null,
+    rationale: "先檢核基本概念。",
+  };
+
+  it("sectionPlan 成功回傳 sections", () => {
+    expect(
+      normalizeApiResult(
+        {
+          ok: true,
+          plan: {
+            sections: [section],
+          },
+        },
+        "sectionPlan",
+      ),
+    ).toEqual({
+      ok: true,
+      plan: {
+        sections: [section],
+      },
+    });
+  });
+
+  it("sectionPlan 缺 sections 時給可讀錯誤", () => {
+    const result = normalizeApiResult({ ok: true, plan: {} }, "sectionPlan");
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("大題規劃草案");
+  });
+
+  it("sectionPlan 大題欄位不完整時指出第幾個大題", () => {
+    const result = normalizeApiResult(
+      {
+        ok: true,
+        plan: {
+          sections: [{ ...section, objectiveIds: "4-1-1" }],
+        },
+      },
+      "sectionPlan",
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("第 1 個大題");
+  });
+});

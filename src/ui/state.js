@@ -71,6 +71,7 @@ function normalizeSection(section, index = 0) {
     subQuestionPlan: Array.isArray(section?.subQuestionPlan)
       ? [...section.subQuestionPlan]
       : [],
+    rationale: typeof section?.rationale === "string" ? section.rationale : "",
   };
 }
 

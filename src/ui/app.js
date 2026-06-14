@@ -9,6 +9,7 @@ import {
   extractObjectivesViaApi,
   generateGroupViaApi,
   generateItemsViaApi,
+  planSectionsViaApi,
   suggestTypesViaApi,
 } from "./apiClient.js";
 import { buildPrintData } from "./buildPrintData.js";
@@ -17,6 +18,10 @@ import { mergeItemBatches, planItemBatches } from "./generateItemsBatched.js";
 import { groupItemsByGroup } from "./groupItemsByGroup.js";
 import { groupObjectivesToUnits } from "./groupObjectivesToUnits.js";
 import { parseObjectivesTsv } from "./parseObjectivesTsv.js";
+import {
+  buildSectionPlanRequest,
+  convertPlanSectionsToStateSections,
+} from "./planSections.js";
 import {
   VERSION_OPTIONS,
   createDefaultProjectDraft,
@@ -100,6 +105,16 @@ let showBlueprintErrors = false;
 let typeSuggestionError = "";
 let typeSuggestionSuccess = "";
 let typeSuggestionProgress = "";
+let sectionPlanPreferences = {
+  sectionCountHint: "",
+  includeGroup: false,
+  groupCountHint: "",
+  preferredTypes: [],
+  note: "",
+};
+let sectionPlanError = "";
+let sectionPlanSuccess = "";
+let sectionPlanProgress = "";
 let copyStatus = "";
 let extractionCopyStatus = "";
 let generationApiError = "";
@@ -1107,6 +1122,60 @@ function renderTypePlanModeSelector() {
   `;
 }
 
+function renderAiSectionPlanningPanel() {
+  const apiAvailable = isApiAvailable();
+  const apiBusy = state.apiBusy === true;
+
+  return `
+    <section class="api-mode-block section-plan-panel" aria-label="AI 整卷規劃">
+      <h3>AI 整卷規劃</h3>
+      <p class="hint-text">可先給少量偏好，讓 AI 產生大題結構草案；填入後仍可在下方原地微調、增刪或重新排序。</p>
+      <div class="form-grid">
+        <label>
+          <span>期望大題數（選填）</span>
+          <input type="number" min="1" max="8" step="1" data-section-plan-field="sectionCountHint" value="${escapeHtml(sectionPlanPreferences.sectionCountHint)}">
+        </label>
+        <label>
+          <span>期望題組數（選填）</span>
+          <input type="number" min="0" max="3" step="1" data-section-plan-field="groupCountHint" value="${escapeHtml(sectionPlanPreferences.groupCountHint)}">
+        </label>
+        <label class="checkbox-line">
+          <input type="checkbox" data-section-plan-field="includeGroup" ${sectionPlanPreferences.includeGroup ? "checked" : ""}>
+          <span>希望包含題組</span>
+        </label>
+        <label class="form-grid__wide">
+          <span>補充說明（選填）</span>
+          <input type="text" data-section-plan-field="note" value="${escapeHtml(sectionPlanPreferences.note)}" placeholder="例：題組以觀察紀錄為主，低階題不要太多">
+        </label>
+      </div>
+      <fieldset class="checkbox-fieldset">
+        <legend>偏好題型（選填）</legend>
+        <div class="checkbox-grid">
+          ${QUESTION_TYPES.map((questionType) => `
+            <label>
+              <input
+                type="checkbox"
+                data-section-plan-type
+                value="${escapeHtml(questionType)}"
+                ${sectionPlanPreferences.preferredTypes.includes(questionType) ? "checked" : ""}
+              >
+              <span>${escapeHtml(questionType)}</span>
+            </label>
+          `).join("")}
+        </div>
+      </fieldset>
+      ${sectionPlanError ? `<p class="field-error">${escapeHtml(sectionPlanError)} 不影響手動排大題。</p>` : ""}
+      ${sectionPlanSuccess ? `<p class="success-notice">${escapeHtml(sectionPlanSuccess)}</p>` : ""}
+      ${sectionPlanProgress ? `<p class="notice notice--inline">${escapeHtml(sectionPlanProgress)}</p>` : ""}
+      ${apiAvailable ? `
+        <div class="step-actions">
+          <button class="button" type="button" data-action="plan-sections-api" ${apiBusy ? "disabled" : ""}>產生規劃草案</button>
+        </div>
+      ` : `<p class="notice notice--inline">目前已關閉 API 模式，請手動新增大題。</p>`}
+    </section>
+  `;
+}
+
 function renderBlueprintStep() {
   const sections = getSectionsWithDisplayTitles();
   const summary = summarizeSections({
@@ -1122,6 +1191,7 @@ function renderBlueprintStep() {
     <section class="step-panel" aria-labelledby="current-step-title">
       <h2 id="current-step-title">④卷結構規劃</h2>
       <p class="notice notice--inline">先排大題，再把已配分的學習目標歸入大題。大題配分由系統依目標配分自動加總，不需手動填分。</p>
+      ${renderAiSectionPlanningPanel()}
       ${summary.errors.length > 0 ? `<ul class="${warningClass}">${summary.errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul>` : `<p class="success-notice">大題結構已完整，總計 ${formatPrintScore(summary.totalSectionScore)} 分。</p>`}
       <div class="step-actions">
         <button class="button" type="button" data-action="add-section">新增大題</button>
@@ -1146,6 +1216,12 @@ function renderBlueprintStep() {
                 <button class="button button--secondary" type="button" data-action="remove-section" data-section-id="${escapeHtml(section.sectionId)}">刪除</button>
               </div>
             </div>
+            ${section.rationale ? `
+              <details class="ai-rationale">
+                <summary>AI 規劃理由</summary>
+                <p>${escapeHtml(section.rationale)}</p>
+              </details>
+            ` : ""}
             <div class="form-grid">
               <label>
                 <span>大題類型</span>
@@ -3048,6 +3124,66 @@ async function handleSuggestTypesViaApi() {
   ]);
 }
 
+async function handlePlanSectionsViaApi() {
+  if (state.apiBusy) {
+    return;
+  }
+
+  if (state.sections.length > 0) {
+    const confirmed = window.confirm(
+      "這會以 AI 草案取代目前的大題結構，是否繼續？",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+  }
+
+  sectionPlanError = "";
+  sectionPlanSuccess = "";
+  sectionPlanProgress = "AI 規劃中，請稍候…";
+  setApiBusy(true);
+  render();
+
+  const request = buildSectionPlanRequest({
+    project: state.project,
+    objectives: state.objectives,
+    objectiveAllocations: getEffectiveObjectiveAllocations(),
+    preferences: sectionPlanPreferences,
+  });
+  const result = await planSectionsViaApi(request);
+
+  if (!result.ok) {
+    sectionPlanError = result.error;
+    sectionPlanProgress = "";
+    setApiBusy(false);
+    render();
+    return;
+  }
+
+  const plannedSections = convertPlanSectionsToStateSections({
+    planSections: result.plan.sections,
+    objectives: state.objectives,
+  });
+
+  if (plannedSections.length === 0) {
+    sectionPlanError = "AI 沒有產生可用的大題草案，請重試或手動排大題。";
+    sectionPlanProgress = "";
+    setApiBusy(false);
+    render();
+    return;
+  }
+
+  sectionPlanProgress = "";
+  sectionPlanSuccess = `已產生 ${plannedSections.length} 個大題草案，可在下方微調。`;
+  showBlueprintErrors = false;
+  setApiBusy(false);
+  dispatchMany([
+    { type: "SET_TYPE_PLAN_MODE", payload: "ai" },
+    { type: "SET_SECTIONS", payload: plannedSections },
+  ]);
+}
+
 async function handleGenerateItemsViaApiLegacy() {
   if (state.apiBusy) {
     return;
@@ -3839,6 +3975,11 @@ async function handleClick(event) {
     return;
   }
 
+  if (action === "plan-sections-api") {
+    await handlePlanSectionsViaApi();
+    return;
+  }
+
   if (action === "generate-items-api") {
     await handleGenerateItemsViaApi();
     return;
@@ -3897,6 +4038,8 @@ function handleInput(event) {
   const objectiveAllocationField = event.target.closest("[data-objective-allocation]");
   const sectionField = event.target.closest("[data-section-field]");
   const sectionObjectiveField = event.target.closest("[data-section-objective]");
+  const sectionPlanField = event.target.closest("[data-section-plan-field]");
+  const sectionPlanType = event.target.closest("[data-section-plan-type]");
   const blueprintField = event.target.closest("[data-blueprint-field], [data-blueprint-type]");
   const tsvInput = event.target.closest("[data-tsv-input]");
   const extractionFileInput = event.target.closest("[data-extraction-file]");
@@ -4029,6 +4172,38 @@ function handleInput(event) {
         objectiveIds: [...objectiveIds],
       },
     });
+    return;
+  }
+
+  if (sectionPlanField) {
+    const field = sectionPlanField.dataset.sectionPlanField;
+    sectionPlanPreferences = {
+      ...sectionPlanPreferences,
+      [field]:
+        sectionPlanField.type === "checkbox"
+          ? sectionPlanField.checked
+          : sectionPlanField.value,
+    };
+    sectionPlanError = "";
+    sectionPlanSuccess = "";
+    return;
+  }
+
+  if (sectionPlanType) {
+    const preferredTypes = new Set(sectionPlanPreferences.preferredTypes);
+
+    if (sectionPlanType.checked) {
+      preferredTypes.add(sectionPlanType.value);
+    } else {
+      preferredTypes.delete(sectionPlanType.value);
+    }
+
+    sectionPlanPreferences = {
+      ...sectionPlanPreferences,
+      preferredTypes: [...preferredTypes],
+    };
+    sectionPlanError = "";
+    sectionPlanSuccess = "";
     return;
   }
 
