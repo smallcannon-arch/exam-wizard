@@ -181,6 +181,25 @@ describe("summarizeSections", () => {
     expect(result.sectionSummaries[0].issues[0]).toContain("自行提供文本");
   });
 
+  it("題組小題數需介於 1 到 8", () => {
+    const result = summarizeSections({
+      sections: [
+        section("S1", ["1-1-1", "1-1-2", "2-1-1"], {
+          kind: "group",
+          questionType: "題組",
+          textMode: "ai",
+          subCount: 9,
+          plannedCount: 9,
+        }),
+      ],
+      objectives,
+      allocations,
+    });
+
+    expect(result.allMatched).toBe(false);
+    expect(result.sectionSummaries[0].issues).toContain("題組小題數需介於 1～8。");
+  });
+
   it("空大題陣列回傳錯誤", () => {
     const result = summarizeSections({ sections: [], objectives, allocations });
 

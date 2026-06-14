@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   applyCandidateSelection,
   buildSelectedItemsFromCandidates,
+  computeGroupSubScores,
   computeSelectionScores,
   summarizeCandidateSelection,
+  validateGroupScores,
 } from "../src/ui/selectItemsFromCandidates.js";
 
 const objectives = [
@@ -24,6 +26,20 @@ const objectives = [
 const blueprint = [
   { objectiveId: "1-1-1", plannedScore: 20 },
   { objectiveId: "1-1-2", plannedScore: 10 },
+];
+
+const groupSections = [
+  {
+    sectionId: "S-G",
+    kind: "group",
+    objectiveIds: ["1-1-1", "1-1-2"],
+    subCount: 3,
+  },
+];
+
+const groupBlueprint = [
+  { sectionId: "S-G", objectiveId: "1-1-1", questionTypes: ["題組"], plannedScore: 33 },
+  { sectionId: "S-G", objectiveId: "1-1-2", questionTypes: ["題組"], plannedScore: 67 },
 ];
 
 function candidate(itemId, objectiveIds, score, selected = false) {
@@ -48,6 +64,69 @@ function candidate(itemId, objectiveIds, score, selected = false) {
 }
 
 describe("summarizeCandidateSelection", () => {
+  it("computeGroupSubScores 可整除均分", () => {
+    expect(computeGroupSubScores({ objectiveScore: 20, subItemCount: 4 })).toEqual({
+      ok: true,
+      scores: [5, 5, 5, 5],
+      errors: [],
+    });
+  });
+
+  it("computeGroupSubScores 會把餘數分配到前幾題", () => {
+    expect(computeGroupSubScores({ objectiveScore: 33, subItemCount: 2 }).scores).toEqual([
+      17,
+      16,
+    ]);
+    expect(computeGroupSubScores({ objectiveScore: 100, subItemCount: 3 }).scores).toEqual([
+      34,
+      33,
+      33,
+    ]);
+    expect(computeGroupSubScores({ objectiveScore: 33, subItemCount: 4 }).scores).toEqual([
+      9,
+      8,
+      8,
+      8,
+    ]);
+  });
+
+  it("computeGroupSubScores 無法分成正整數時回傳錯誤", () => {
+    expect(computeGroupSubScores({ objectiveScore: 2, subItemCount: 3 })).toMatchObject({
+      ok: false,
+      scores: [],
+    });
+  });
+
+  it("validateGroupScores 可驗證多目標題組小題加總", () => {
+    const result = validateGroupScores({
+      groupSubItems: [
+        candidate("G-01-1", ["1-1-1"], 17),
+        candidate("G-01-2", ["1-1-1"], 16),
+        candidate("G-01-3", ["1-1-2"], 67),
+      ],
+      objectiveScores: new Map([
+        ["1-1-1", 33],
+        ["1-1-2", 67],
+      ]),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.objectiveResults.map((entry) => entry.actualScore)).toEqual([33, 67]);
+  });
+
+  it("validateGroupScores 可抓出手動改分後加總不符", () => {
+    const result = validateGroupScores({
+      groupSubItems: [
+        candidate("G-01-1", ["1-1-1"], 18),
+        candidate("G-01-2", ["1-1-1"], 16),
+      ],
+      objectiveScores: { "1-1-1": 33 },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.errors[0]).toContain("34/33");
+  });
+
   it("computeSelectionScores 可判斷整除與除不盡", () => {
     expect(computeSelectionScores({ objectiveScore: 20, selectedCount: 4 })).toMatchObject({
       ok: true,
@@ -160,24 +239,71 @@ describe("summarizeCandidateSelection", () => {
 
   it("題組候選題會整組選入並納入各目標配分", () => {
     const pool = [
-      candidate("G-01-1", ["1-1-1"], 20, false),
-      candidate("G-01-2", ["1-1-2"], 10, false),
+      candidate("G-01-1", ["1-1-1"], 16.5, false),
+      candidate("G-01-2", ["1-1-1"], 16.5, false),
+      candidate("G-01-3", ["1-1-2"], 67, false),
       candidate("C-03", ["1-1-1"], 5, false),
     ].map((item, index) =>
-      index < 2 ? { ...item, groupId: "G-01", cognitiveLevel: index === 0 ? "提取" : "整合" } : item,
+      index < 3
+        ? {
+            ...item,
+            sectionId: "S-G",
+            groupId: "G-01",
+            cognitiveLevel: index === 0 ? "提取" : "整合",
+          }
+        : item,
     );
     const selectedPool = applyCandidateSelection(pool, "G-01-1", true);
     const result = summarizeCandidateSelection({
       objectives,
-      blueprint,
+      blueprint: groupBlueprint,
       candidatePool: selectedPool,
+      sections: groupSections,
     });
 
     expect(selectedPool[0].selected).toBe(true);
     expect(selectedPool[1].selected).toBe(true);
-    expect(selectedPool[2].selected).toBe(false);
+    expect(selectedPool[2].selected).toBe(true);
+    expect(selectedPool[3].selected).toBe(false);
     expect(result.allMatched).toBe(true);
-    expect(result.selectedItems.map((item) => item.groupId)).toEqual(["G-01", "G-01"]);
+    expect(result.selectedItems.map((item) => item.score)).toEqual([17, 16, 67]);
+    expect(result.groupObjectiveResults.find((entry) => entry.objectiveId === "1-1-1")).toMatchObject({
+      actualScore: 33,
+      expectedScore: 33,
+      status: "pass",
+    });
+  });
+
+  it("題組手動配分不等於目標配分時會擋下", () => {
+    const pool = [
+      {
+        ...candidate("G-01-1", ["1-1-1"], 18, true),
+        sectionId: "S-G",
+        groupId: "G-01",
+        scoreManual: true,
+      },
+      {
+        ...candidate("G-01-2", ["1-1-1"], 16, true),
+        sectionId: "S-G",
+        groupId: "G-01",
+        scoreManual: true,
+      },
+      {
+        ...candidate("G-01-3", ["1-1-2"], 67, true),
+        sectionId: "S-G",
+        groupId: "G-01",
+        scoreManual: true,
+      },
+    ];
+    const result = summarizeCandidateSelection({
+      objectives,
+      blueprint: groupBlueprint,
+      candidatePool: pool,
+      sections: groupSections,
+    });
+
+    expect(result.allMatched).toBe(false);
+    expect(result.errors[0]).toContain("34/33");
   });
 
   it("題組候選題會整組取消選入", () => {

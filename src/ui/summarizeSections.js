@@ -124,7 +124,11 @@ function getPlannedCounts(sections = []) {
   const plannedCounts = new Map();
 
   sections.forEach((section) => {
-    const count = section.kind === "group" ? section.subCount : section.plannedCount;
+    if (section.kind === "group") {
+      return;
+    }
+
+    const count = section.plannedCount;
 
     section.objectiveIds.forEach((objectiveId) => {
       plannedCounts.set(objectiveId, (plannedCounts.get(objectiveId) ?? 0) + count);
@@ -203,8 +207,12 @@ export function summarizeSections({
     const issues = [];
 
     if (section.kind === "group") {
-      if (section.subCount < 1) {
-        issues.push("題組小題數需大於 0。");
+      if (
+        !Number.isInteger(Number(section.subCount)) ||
+        Number(section.subCount) < 1 ||
+        Number(section.subCount) > 8
+      ) {
+        issues.push("題組小題數需介於 1～8。");
       }
 
       if (section.textMode === "provided" && !hasText(section.providedText)) {

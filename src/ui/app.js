@@ -1087,6 +1087,10 @@ function renderBlueprintStep() {
         const sectionSummary = summary.sectionSummaries.find(
           (entry) => entry.sectionId === section.sectionId,
         );
+        const showSectionIssues =
+          sectionSummary?.issues.length > 0 &&
+          (showBlueprintErrors ||
+            sectionSummary.issues.some((issue) => issue.includes("小題數")));
 
         return `
           <section class="blueprint-unit section-planner" data-section-id="${escapeHtml(section.sectionId)}">
@@ -1157,7 +1161,7 @@ function renderBlueprintStep() {
                 </label>
               `).join("")}
             </div>
-            ${sectionSummary?.issues.length > 0 && showBlueprintErrors ? `<ul class="row-errors">${sectionSummary.issues.map((issue) => `<li>${escapeHtml(issue)}</li>`).join("")}</ul>` : ""}
+            ${showSectionIssues ? `<ul class="row-errors">${sectionSummary.issues.map((issue) => `<li>${escapeHtml(issue)}</li>`).join("")}</ul>` : ""}
           </section>
         `;
       }).join("")}
@@ -1379,14 +1383,18 @@ function renderCandidateOption(item) {
   `;
 }
 
-function renderGroupCandidateCard(groupItems) {
+function renderGroupCandidateCard(groupItems, summary) {
   const firstItem = groupItems[0] ?? {};
   const isSelected = groupItems.every((item) => item.selected === true);
+  const groupSectionId = firstItem.sectionId ?? "";
   const cognitiveLevels = [...new Set(
     groupItems
       .map((item) => item.cognitiveLevel)
       .filter((level) => typeof level === "string" && level.trim() !== ""),
   )];
+  const groupObjectiveResults = (summary?.groupObjectiveResults ?? []).filter(
+    (result) => result.sectionId === groupSectionId,
+  );
 
   return `
     <article class="candidate-card candidate-card--group ${isSelected ? "candidate-card--selected" : ""}">
@@ -1402,12 +1410,35 @@ function renderGroupCandidateCard(groupItems) {
       <p><strong>題組</strong>｜${groupItems.length} 小題｜選入後依目標配分自動計分</p>
       ${firstItem.stimulus ? `<div class="stimulus">${escapeHtml(firstItem.stimulus)}</div>` : ""}
       ${cognitiveLevels.length > 0 ? `<p class="hint-text">認知層次：${escapeHtml(cognitiveLevels.join("、"))}</p>` : ""}
+      ${isSelected && groupObjectiveResults.length > 0 ? `
+        <ul class="selection-score-list">
+          ${groupObjectiveResults.map((result) => `
+            <li class="${result.status === "pass" ? "success-notice" : "field-error"}">
+              目標 ${escapeHtml(result.objectiveId)}：小題合計 ${escapeHtml(formatPrintScore(result.actualScore))}/${escapeHtml(formatPrintScore(result.expectedScore))} ${result.status === "pass" ? "✅" : "❌"}
+            </li>
+          `).join("")}
+        </ul>
+      ` : ""}
       <ol class="candidate-subitems">
         ${groupItems.map((item) => `
           <li>
             <strong>${escapeHtml(item.questionType || "小題")}</strong>
             ${escapeHtml(item.question || "未填題幹")}
             <span class="hint-text">（目標：${escapeHtml((item.objectiveIds ?? []).join("、"))}${item.cognitiveLevel ? `｜${escapeHtml(item.cognitiveLevel)}` : ""}）</span>
+            ${isSelected ? `
+              <label class="compact-field compact-field--inline">
+                <span>小題配分</span>
+                <input
+                  class="score-input"
+                  type="number"
+                  min="1"
+                  step="1"
+                  data-group-item-score
+                  data-candidate-id="${escapeHtml(item.itemId)}"
+                  value="${escapeHtml(summary?.scoreByItemId?.get(item.itemId) ?? item.score ?? 1)}"
+                >
+              </label>
+            ` : ""}
           </li>
         `).join("")}
       </ol>
@@ -1415,7 +1446,7 @@ function renderGroupCandidateCard(groupItems) {
   `;
 }
 
-function renderGroupCandidates(candidates) {
+function renderGroupCandidates(candidates, summary) {
   const groups = [];
   const groupMap = new Map();
 
@@ -1435,7 +1466,7 @@ function renderGroupCandidates(candidates) {
 
   return `
     <div class="candidate-list">
-      ${groups.map(renderGroupCandidateCard).join("")}
+      ${groups.map((groupItems) => renderGroupCandidateCard(groupItems, summary)).join("")}
     </div>
   `;
 }
@@ -1485,7 +1516,9 @@ function renderSelectionObjectiveSummary(summary) {
         ${summary.objectiveSummaries.map((objective) => {
           const statusIcon = objective.status === "pass" ? "✅" : "❌";
           const perItemScore =
-            objective.perItemScore === null || objective.perItemScore === undefined
+            objective.groupSelectedCount > 0 && objective.normalExpectedScore === 0
+              ? "題組小題各自給分"
+              : objective.perItemScore === null || objective.perItemScore === undefined
               ? "無法平分"
               : `${formatPrintScore(objective.perItemScore)} 分`;
 
@@ -1506,6 +1539,7 @@ function renderSelectionStep() {
     objectives: state.objectives,
     blueprint: state.blueprint,
     candidatePool: state.candidatePool,
+    sections: state.sections,
   });
   const candidateCount = Array.isArray(state.candidatePool)
     ? state.candidatePool.length
@@ -1526,10 +1560,10 @@ function renderSelectionStep() {
           <section class="selection-objective">
             <h3>${escapeHtml(section.title)}</h3>
             <p class="unit-summary">
-              已選 ${selectedCandidates.length} 題／預計 ${escapeHtml(section.kind === "group" ? section.subCount : section.plannedCount)} 題；題分會依目標配分於確認選題時自動均分。
+              已選 ${selectedCandidates.length} 題／預計 ${escapeHtml(section.kind === "group" ? section.subCount : section.plannedCount)} 題；${section.kind === "group" ? "題組小題可各自給分，分目標合計需符合應配分。" : "題分會依目標配分於確認選題時自動均分。"}
             </p>
             <p class="hint-text">涵蓋目標：${escapeHtml((section.objectiveIds ?? []).join("、"))}</p>
-            ${candidates.length > 0 ? (section.kind === "group" ? renderGroupCandidates(candidates) : renderCandidatesByType(candidates)) : `<p class="field-error">此大題目前沒有備選題，請回步驟 5 重新生成或改用手動出題。</p>`}
+            ${candidates.length > 0 ? (section.kind === "group" ? renderGroupCandidates(candidates, summary) : renderCandidatesByType(candidates)) : `<p class="field-error">此大題目前沒有備選題，請回步驟 5 重新生成或改用手動出題。</p>`}
           </section>
         `;
       }).join("")}
@@ -3207,6 +3241,7 @@ function handleConfirmSelection() {
     objectives: state.objectives,
     blueprint: state.blueprint,
     candidatePool: state.candidatePool,
+    sections: state.sections,
   });
 
   if (!summary.allMatched) {
@@ -3729,6 +3764,7 @@ function handleInput(event) {
   const extractionMaterialInput = event.target.closest("[data-extraction-material-text]");
   const materialTextInput = event.target.closest("[data-material-text]");
   const candidatesPerObjectiveInput = event.target.closest("[data-candidates-per-objective]");
+  const groupItemScoreInput = event.target.closest("[data-group-item-score]");
   const itemsJsonInput = event.target.closest("[data-items-json]");
 
   if (projectField) {
@@ -3910,6 +3946,28 @@ function handleInput(event) {
       updatedAt: new Date().toISOString(),
     });
     saveState();
+    return;
+  }
+
+  if (groupItemScoreInput) {
+    const candidateId = groupItemScoreInput.dataset.candidateId;
+    const nextPool = state.candidatePool.map((item) =>
+      item.itemId === candidateId
+        ? {
+            ...item,
+            score: Number(groupItemScoreInput.value),
+            scoreManual: true,
+          }
+        : item,
+    );
+
+    state = applyAction(state, {
+      type: "SET_CANDIDATE_POOL",
+      payload: nextPool,
+      updatedAt: new Date().toISOString(),
+    });
+    saveState();
+    render();
     return;
   }
 
