@@ -16,6 +16,12 @@ import { mergeItemBatches, planItemBatches } from "./generateItemsBatched.js";
 import { groupItemsByGroup } from "./groupItemsByGroup.js";
 import { groupObjectivesToUnits } from "./groupObjectivesToUnits.js";
 import { parseObjectivesTsv } from "./parseObjectivesTsv.js";
+import {
+  VERSION_OPTIONS,
+  createDefaultProjectDraft,
+  normalizeProjectDraftData,
+  validateProjectDraftData,
+} from "./projectDraft.js";
 import { renumberObjectives } from "./renumberObjectives.js";
 import {
   applyCandidateSelection,
@@ -53,7 +59,6 @@ import {
 const STORAGE_KEY = "exam-wizard-draft";
 const QUESTION_TYPES = ["選擇題", "填充題", "應用題", "勾選題", "畫圖題", "其他"];
 const SECTION_NUMERALS = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
-const VERSION_OPTIONS = ["翰林", "康軒", "南一", "自編教材", "其他"];
 const CHINESE_DIMENSION_OPTIONS = [
   ["", "請選擇"],
   ["word_phrase", "字詞短語"],
@@ -61,19 +66,7 @@ const CHINESE_DIMENSION_OPTIONS = [
   ["reading_writing", "段篇讀寫"],
 ];
 const appRoot = document.querySelector("[data-app]");
-const defaultProjectDraft = {
-  schoolYear: "114",
-  semester: "1",
-  examNumber: "1",
-  grade: "",
-  subject: "",
-  version: "翰林",
-  versionOther: "",
-  publisher: "",
-  publisherOther: "",
-  scope: "",
-  teacher: "",
-};
+const defaultProjectDraft = createDefaultProjectDraft();
 
 let state = createInitialState();
 let notice = "";
@@ -332,6 +325,7 @@ function renderProjectForm() {
         <label>
           <span>版本＊</span>
           <select name="version" data-project-field>
+            <option value="" ${isSelected(projectDraft.version, "")}>請選擇</option>
             ${VERSION_OPTIONS.map((version) => `<option value="${version}" ${isSelected(projectDraft.version, version)}>${version}</option>`).join("")}
           </select>
           ${renderFieldError("version")}
@@ -2509,51 +2503,11 @@ function clearRenumberFeedback() {
 }
 
 function validateProjectDraft() {
-  const errors = {};
-  const requiredFields = [
-    ["schoolYear", "請填寫學年度。"],
-    ["semester", "請選擇學期。"],
-    ["examNumber", "請選擇第幾次定期評量。"],
-    ["grade", "請選擇年級。"],
-    ["subject", "請選擇領域。"],
-    ["version", "請選擇版本。"],
-    ["scope", "請填寫考試範圍。"],
-  ];
-
-  requiredFields.forEach(([field, message]) => {
-    if (!String(projectDraft[field] ?? "").trim()) {
-      errors[field] = message;
-    }
-  });
-
-  if (projectDraft.version === "其他" && !projectDraft.versionOther.trim()) {
-    errors.versionOther = "請輸入版本名稱。";
-  }
-
-  return errors;
+  return validateProjectDraftData(projectDraft);
 }
 
 function normalizeProjectDraft() {
-  const version =
-    projectDraft.version === "其他"
-      ? projectDraft.versionOther.trim()
-      : projectDraft.version;
-
-  return {
-    schoolYear: Number(projectDraft.schoolYear),
-    semester: Number(projectDraft.semester),
-    examNumber: Number(projectDraft.examNumber),
-    grade: Number(projectDraft.grade),
-    subject: projectDraft.subject,
-    version,
-    versionChoice: projectDraft.version,
-    versionOther: projectDraft.version === "其他" ? projectDraft.versionOther.trim() : "",
-    publisher: version,
-    publisherOther: projectDraft.version === "其他" ? projectDraft.versionOther.trim() : "",
-    scope: projectDraft.scope.trim(),
-    teacher: projectDraft.teacher.trim(),
-    totalScore: 100,
-  };
+  return normalizeProjectDraftData(projectDraft);
 }
 
 function enterStep(stepNumber) {

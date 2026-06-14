@@ -23,6 +23,10 @@ function isNoteLine(row) {
   return normalized.startsWith("註：") || normalized.startsWith("註:");
 }
 
+function isCodeFence(row) {
+  return normalizeCell(row).startsWith("```");
+}
+
 function isMarkdownSeparator(cells) {
   return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(normalizeCell(cell)));
 }
@@ -52,6 +56,20 @@ function parseRowCells(row) {
   }
 
   return row.split("\t").map(normalizeCell);
+}
+
+function looksLikeWhitespaceSeparatedObjectiveRow(row) {
+  const normalized = normalizeCell(row);
+
+  if (normalized.includes("\t") || normalized.includes("|")) {
+    return false;
+  }
+
+  return /^\S+\s{2,}.+\s{2,}\S+$/.test(normalized);
+}
+
+function formatWhitespaceSeparatedError(rowNumber) {
+  return `第 ${rowNumber} 列疑似使用空白分隔欄位，系統無法可靠判斷「大單元／小單元／學習目標」邊界。請改用 Tab 分隔，或貼成 Markdown 表格：目標編號 | 大單元 | 小單元 | 學習目標 | 授課節數。`;
 }
 
 function toHalfWidthNumberText(value) {
@@ -118,6 +136,10 @@ export function parseObjectivesTsv(text) {
       return;
     }
 
+    if (isCodeFence(row)) {
+      return;
+    }
+
     if (isBlankRow(cells)) {
       return;
     }
@@ -127,7 +149,11 @@ export function parseObjectivesTsv(text) {
     }
 
     if (cells.length !== FIELD_NAMES.length) {
-      errors.push(`第 ${rowNumber} 列欄位數不正確，應為 5 欄。`);
+      errors.push(
+        looksLikeWhitespaceSeparatedObjectiveRow(row)
+          ? formatWhitespaceSeparatedError(rowNumber)
+          : `第 ${rowNumber} 列欄位數不正確，應為 5 欄。`,
+      );
       return;
     }
 

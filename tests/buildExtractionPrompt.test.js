@@ -45,14 +45,24 @@ describe("buildObjectiveExtractionPrompt", () => {
     expect(result.prompt).toContain("pc-III-2、INc-III-14、自-E-A1");
   });
 
-  it("包含欄位說明與 TSV 輸出格式限制", () => {
+  it("包含欄位說明與 Markdown 表格輸出格式限制", () => {
     const result = buildObjectiveExtractionPrompt({ project });
 
     expect(result.prompt).toContain("目標編號、大單元名稱、小單元（課）名稱、學習目標文字、授課節數");
     expect(result.prompt).toContain(OBJECTIVE_EXTRACTION_OUTPUT_FORMAT);
     expect(result.prompt).toContain(
+      "請以 Markdown 表格輸出，欄位依序為：目標編號 | 大單元 | 小單元 | 學習目標 | 授課節數。",
+    );
+    expect(result.prompt).toContain(
       "授課節數欄只填數字（如 1 或 0.5），不要加『節』等單位文字，也不要使用中文數字。",
     );
+  });
+
+  it("保留逐字擷取與小單元編號規則", () => {
+    const result = buildObjectiveExtractionPrompt({ project });
+
+    expect(result.prompt).toContain("學習目標文字必須照教案原文逐字擷取");
+    expect(result.prompt).toContain(newNumberingRule);
   });
 
   it("要求註明來源段落與頁次，方便教師回查", () => {

@@ -122,6 +122,25 @@ describe("parseObjectivesTsv", () => {
     });
   });
 
+  it("可解析包在 Markdown code fence 內的表格", () => {
+    const result = parseObjectivesTsv(
+      [
+        "```markdown",
+        "| 目標編號 | 大單元 | 小單元 | 學習目標 | 授課節數 |",
+        "| --- | --- | --- | --- | --- |",
+        "| 4-2-1 | 四、揭祕動物的世界 | 4-2 動物的生存之道 | 能依據觀察資料說明動物的生存策略。 | 1節 |",
+        "```",
+      ].join("\n"),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.objectives).toHaveLength(1);
+    expect(result.objectives[0]).toMatchObject({
+      objectiveId: "4-2-1",
+      periodCount: 1,
+    });
+  });
+
   it("可混合 TSV 與 Markdown 表格列", () => {
     const result = parseObjectivesTsv(
       [
@@ -158,5 +177,20 @@ describe("parseObjectivesTsv", () => {
 
     expect(result.ok).toBe(false);
     expect(result.errors).toContain("第 1 列欄位數不正確，應為 5 欄。");
+  });
+
+  it("純空白分隔列給明確指引且不阻止其他正常列匯入", () => {
+    const result = parseObjectivesTsv(
+      [
+        "4-2-1\t四、揭祕動物的世界\t4-2 動物的生存之道\t能依據資料說明動物的生存策略。\t1",
+        "4-2-2  四、揭祕動物的世界  4-2 動物的生存之道  能比較動物構造與環境的關係。  1",
+      ].join("\n"),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.objectives).toHaveLength(1);
+    expect(result.errors[0]).toContain("疑似使用空白分隔欄位");
+    expect(result.errors[0]).toContain("請改用 Tab 分隔，或貼成 Markdown 表格");
+    expect(result.errors[0]).not.toBe("第 2 列欄位數不正確，應為 5 欄。");
   });
 });
