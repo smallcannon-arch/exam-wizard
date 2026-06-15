@@ -63,7 +63,7 @@ describe("summarizeSections", () => {
     expect(result.coverageRate).toBe(1);
   });
 
-  it("一個目標跨多大題時配分平均分攤且總計仍為 100", () => {
+  it("一個目標跨多大題時配分以整數湊整且總計仍為 100", () => {
     const result = summarizeSections({
       sections: [
         section("S1", ["1-1-1", "1-1-2"], { plannedCount: 25 }),
@@ -81,6 +81,35 @@ describe("summarizeSections", () => {
     expect(result.allMatched).toBe(true);
     expect(result.sectionSummaries.map((entry) => entry.score)).toEqual([50, 50]);
     expect(result.objectiveSummaries.find((entry) => entry.objectiveId === "1-1-1").coverageCount).toBe(2);
+  });
+
+  it("跨大題分攤不產生 16.5 類小數配分", () => {
+    const result = summarizeSections({
+      sections: [
+        section("S1", ["1-1-1"], { plannedCount: 17 }),
+        section("S2", ["1-1-1"], { questionType: "應用題", plannedCount: 16 }),
+        section("S3", ["1-1-2"], { questionType: "填充題", plannedCount: 17 }),
+        section("S4", ["2-1-1"], { questionType: "應用題", plannedCount: 11 }),
+      ],
+      objectives,
+      allocations,
+      objectiveAllocations: [
+        { objectiveId: "1-1-1", actualScore: 33 },
+        { objectiveId: "1-1-2", actualScore: 34 },
+        { objectiveId: "2-1-1", actualScore: 33 },
+      ],
+    });
+    const blueprint = buildBlueprintFromSections(result);
+
+    expect(result.allMatched).toBe(true);
+    expect(result.sectionSummaries.map((entry) => entry.score)).toEqual([
+      17,
+      16,
+      34,
+      33,
+    ]);
+    expect(blueprint.map((entry) => entry.plannedScore)).toEqual([17, 16, 34, 33]);
+    expect(blueprint.every((entry) => Number.isInteger(entry.plannedScore))).toBe(true);
   });
 
   it("有目標未涵蓋時列出 missingObjectiveIds 並阻擋", () => {
@@ -131,7 +160,7 @@ describe("summarizeSections", () => {
     });
 
     expect(result.allMatched).toBe(false);
-    expect(result.errors.some((error) => error.includes("無法平分"))).toBe(true);
+    expect(result.errors.some((error) => error.includes("無法整除"))).toBe(true);
   });
 
   it("一般大題每題配分超過 3 分時在該大題列出錯誤", () => {

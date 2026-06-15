@@ -5,6 +5,7 @@ import {
   legalQuestionCounts,
   validateAllocations,
 } from "./validateAllocations.js";
+import { distributeIntegerScores } from "./distributeIntegerScores.js";
 
 const EPSILON = 1e-9;
 
@@ -146,6 +147,40 @@ function getPlannedCounts(sections = []) {
   return plannedCounts;
 }
 
+function getSectionObjectiveKey(sectionId, objectiveId) {
+  return `${sectionId}::${objectiveId}`;
+}
+
+function buildSectionObjectiveScoreMap(sections, objectiveById, objectiveScores) {
+  const referencesByObjectiveId = new Map();
+
+  sections.forEach((section) => {
+    section.objectiveIds
+      .filter((objectiveId) => objectiveById.has(objectiveId))
+      .forEach((objectiveId) => {
+        const references = referencesByObjectiveId.get(objectiveId) ?? [];
+        references.push(section.sectionId);
+        referencesByObjectiveId.set(objectiveId, references);
+      });
+  });
+
+  const scoreBySectionObjective = new Map();
+
+  referencesByObjectiveId.forEach((sectionIds, objectiveId) => {
+    const totalScore = objectiveScores.get(objectiveId) ?? 0;
+    const distributedScores = distributeIntegerScores(totalScore, sectionIds.length);
+
+    sectionIds.forEach((sectionId, index) => {
+      scoreBySectionObjective.set(
+        getSectionObjectiveKey(sectionId, objectiveId),
+        distributedScores[index] ?? totalScore / sectionIds.length,
+      );
+    });
+  });
+
+  return scoreBySectionObjective;
+}
+
 function buildLegalCountSuggestion(counts) {
   return counts.length > 0 ? `建議題數：${counts.join("、")}。` : "";
 }
@@ -153,8 +188,7 @@ function buildLegalCountSuggestion(counts) {
 function buildNormalSectionIssues({
   section,
   objectiveIds,
-  coverageCounts,
-  objectiveScores,
+  sectionObjectiveScores,
   maxPerItemScore = DEFAULT_MAX_PER_ITEM_SCORE,
 }) {
   if (section.kind === "group" || section.plannedCount < 1) {
@@ -162,8 +196,8 @@ function buildNormalSectionIssues({
   }
 
   return objectiveIds.flatMap((objectiveId) => {
-    const coverageCount = coverageCounts.get(objectiveId) ?? 1;
-    const sectionScore = (objectiveScores.get(objectiveId) ?? 0) / coverageCount;
+    const sectionScore =
+      sectionObjectiveScores.get(getSectionObjectiveKey(section.sectionId, objectiveId)) ?? 0;
     const legalCounts = legalQuestionCounts({
       objectiveScore: sectionScore,
       maxPerItem: maxPerItemScore,
@@ -206,22 +240,10 @@ export function summarizeSections({
     ? sections.map(normalizeSection).sort((left, right) => left.order - right.order)
     : [];
   const plannedCounts = getPlannedCounts(safeSections);
-  const objectiveAllocationsWithPlannedCounts = (
-    Array.isArray(objectiveAllocations) ? objectiveAllocations : []
-  ).map((allocation) => {
-    const plannedCount = plannedCounts.get(String(allocation?.objectiveId ?? ""));
-
-    return plannedCount
-      ? {
-          ...allocation,
-          plannedCount,
-        }
-      : allocation;
-  });
   const scoreResult = buildObjectiveScores(
     safeObjectives,
     allocations,
-    objectiveAllocationsWithPlannedCounts,
+    Array.isArray(objectiveAllocations) ? objectiveAllocations : [],
     maxPerItemScore,
   );
 
@@ -244,6 +266,11 @@ export function summarizeSections({
     safeObjectives.map((objective) => [objective.objectiveId, objective]),
   );
   const coverageCounts = getCoverageCounts(safeSections);
+  const sectionObjectiveScores = buildSectionObjectiveScoreMap(
+    safeSections,
+    objectiveById,
+    scoreResult.objectiveScores,
+  );
   const objectiveSummaries = safeObjectives.map((objective) => {
     const objectiveId = objective.objectiveId;
     const score = scoreResult.objectiveScores.get(objectiveId) ?? 0;
@@ -289,17 +316,21 @@ export function summarizeSections({
     const knownObjectiveIds = section.objectiveIds.filter((objectiveId) =>
       objectiveById.has(objectiveId),
     );
+    const objectiveScoresForSection = Object.fromEntries(
+      knownObjectiveIds.map((objectiveId) => [
+        objectiveId,
+        sectionObjectiveScores.get(getSectionObjectiveKey(section.sectionId, objectiveId)) ?? 0,
+      ]),
+    );
     const score = knownObjectiveIds.reduce((sum, objectiveId) => {
-      const coverageCount = coverageCounts.get(objectiveId) ?? 1;
-      return sum + (scoreResult.objectiveScores.get(objectiveId) ?? 0) / coverageCount;
+      return sum + (objectiveScoresForSection[objectiveId] ?? 0);
     }, 0);
 
     issues.push(
       ...buildNormalSectionIssues({
         section,
         objectiveIds: knownObjectiveIds,
-        coverageCounts,
-        objectiveScores: scoreResult.objectiveScores,
+        sectionObjectiveScores,
         maxPerItemScore,
       }),
     );
@@ -307,6 +338,7 @@ export function summarizeSections({
     return {
       ...section,
       objectiveIds: knownObjectiveIds,
+      objectiveScores: objectiveScoresForSection,
       score,
       ratio: scoreResult.totalScore > 0 ? score / scoreResult.totalScore : 0,
       status: issues.length === 0 ? "pass" : "error",
@@ -379,14 +411,16 @@ export function buildBlueprintFromSections(summary) {
   return summary.sectionSummaries.flatMap((section) =>
     section.objectiveIds.map((objectiveId) => {
       const objective = objectiveScoreById.get(objectiveId);
-      const coverageCount = objective?.coverageCount || 1;
+      const plannedScore =
+        section.objectiveScores?.[objectiveId] ??
+        (objective?.score ?? 0) / (objective?.coverageCount || 1);
 
       return {
         sectionId: section.sectionId,
         objectiveId,
         unitName: objective?.unitName ?? "",
         questionTypes: [section.questionType],
-        plannedScore: (objective?.score ?? 0) / coverageCount,
+        plannedScore,
         plannedCount: section.kind === "group" ? section.subCount : section.plannedCount,
         groupHint: "",
       };

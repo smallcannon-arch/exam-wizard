@@ -231,4 +231,119 @@ describe("convertPlanSectionsToStateSections", () => {
       subCount: 2,
     });
   });
+
+  it("同一目標出現在多個一般大題時先整數分配再修正題數", () => {
+    const sections = convertPlanSectionsToStateSections({
+      objectives,
+      objectiveAllocations: [
+        { objectiveId: "4-1-1", actualScore: 33 },
+        { objectiveId: "4-2-1", actualScore: 67 },
+      ],
+      planSections: [
+        {
+          title: "一、選擇題",
+          kind: "normal",
+          questionType: "選擇題",
+          objectiveIds: ["4-1-1"],
+          plannedCount: 2,
+          groupPlan: null,
+          rationale: "第一批。",
+        },
+        {
+          title: "二、應用題",
+          kind: "normal",
+          questionType: "應用題",
+          objectiveIds: ["4-1-1"],
+          plannedCount: 2,
+          groupPlan: null,
+          rationale: "第二批。",
+        },
+        {
+          title: "三、填充題",
+          kind: "normal",
+          questionType: "填充題",
+          objectiveIds: ["4-2-1"],
+          plannedCount: 2,
+          groupPlan: null,
+          rationale: "第三批。",
+        },
+      ],
+    });
+    const summary = summarizeSections({
+      sections,
+      objectives,
+      allocations,
+      objectiveAllocations: [
+        { objectiveId: "4-1-1", actualScore: 33 },
+        { objectiveId: "4-2-1", actualScore: 67 },
+      ],
+    });
+
+    expect(sections.map((section) => section.plannedCount)).toEqual([17, 8, 67]);
+    expect(summary.sectionSummaries.map((section) => section.score)).toEqual([17, 16, 67]);
+    expect(summary.sectionSummaries.every((section) =>
+      Object.values(section.objectiveScores).every((score) => Number.isInteger(score)),
+    )).toBe(true);
+  });
+
+  it("多目標大題使用整數配分判定合法題數", () => {
+    const sections = convertPlanSectionsToStateSections({
+      objectives,
+      objectiveAllocations: [
+        { objectiveId: "4-1-1", actualScore: 33 },
+        { objectiveId: "4-2-1", actualScore: 66 },
+      ],
+      planSections: [
+        {
+          title: "一、綜合題",
+          kind: "normal",
+          questionType: "應用題",
+          objectiveIds: ["4-1-1", "4-2-1"],
+          plannedCount: 4,
+          groupPlan: null,
+          rationale: "共同考查。",
+        },
+      ],
+    });
+
+    expect(sections[0].plannedCount).toBe(33);
+    expect(sections[0].rationale).toContain("題數已由 4 調整為 33");
+  });
+
+  it("題組與一般大題共享目標時一般大題仍以整數分攤計算", () => {
+    const sections = convertPlanSectionsToStateSections({
+      objectives,
+      objectiveAllocations: [
+        { objectiveId: "4-1-1", actualScore: 33 },
+        { objectiveId: "4-2-1", actualScore: 67 },
+      ],
+      planSections: [
+        {
+          title: "一、選擇題",
+          kind: "normal",
+          questionType: "選擇題",
+          objectiveIds: ["4-1-1"],
+          plannedCount: 2,
+          groupPlan: null,
+          rationale: "一般題。",
+        },
+        {
+          title: "二、題組",
+          kind: "group",
+          questionType: "題組",
+          objectiveIds: ["4-1-1", "4-2-1"],
+          plannedCount: 2,
+          groupPlan: {
+            subCount: 2,
+            topicHint: "觀察紀錄",
+            coveredObjectiveIds: ["4-1-1", "4-2-1"],
+          },
+          rationale: "題組。",
+        },
+      ],
+    });
+
+    expect(sections[0].plannedCount).toBe(17);
+    expect(sections[1]).toMatchObject({ kind: "group", plannedCount: 2 });
+  });
 });

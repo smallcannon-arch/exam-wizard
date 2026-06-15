@@ -17,6 +17,7 @@ import { replaceFieldLabels } from "./fieldLabels.js";
 import { mergeItemBatches, planItemBatches } from "./generateItemsBatched.js";
 import { groupItemsByGroup } from "./groupItemsByGroup.js";
 import { groupObjectivesToUnits } from "./groupObjectivesToUnits.js";
+import { distributeIntegerScores } from "./distributeIntegerScores.js";
 import { parseObjectivesTsv } from "./parseObjectivesTsv.js";
 import {
   buildSectionPlanRequest,
@@ -3334,6 +3335,16 @@ function convertGeneratedGroupToItems({
       (countByObjective.get(subItem.objectiveId) ?? 0) + 1,
     );
   });
+  const scoreQueuesByObjective = new Map();
+  const usedScoreCountByObjective = new Map();
+
+  countByObjective.forEach((count, objectiveId) => {
+    const targetScore = plannedScoreByObjective.get(objectiveId) ?? 0;
+    scoreQueuesByObjective.set(
+      objectiveId,
+      distributeIntegerScores(targetScore, count),
+    );
+  });
 
   const groupId = `G-${String(groupIndex + 1).padStart(2, "0")}-${section.sectionId}`;
   const stimulus = group.stimulus ?? "";
@@ -3341,6 +3352,11 @@ function convertGeneratedGroupToItems({
   return subItems.map((subItem, index) => {
     const targetScore = plannedScoreByObjective.get(subItem.objectiveId) ?? 0;
     const count = countByObjective.get(subItem.objectiveId) ?? 1;
+    const usedCount = usedScoreCountByObjective.get(subItem.objectiveId) ?? 0;
+    const scoreQueue = scoreQueuesByObjective.get(subItem.objectiveId) ?? [];
+    const score = scoreQueue[usedCount] ?? targetScore / count;
+
+    usedScoreCountByObjective.set(subItem.objectiveId, usedCount + 1);
 
     return {
       itemId: `${groupId}-${index + 1}`,
@@ -3355,7 +3371,7 @@ function convertGeneratedGroupToItems({
       answer: subItem.answer ?? "",
       explanation: subItem.explanation ?? "",
       objectiveIds: subItem.objectiveId ? [subItem.objectiveId] : [],
-      score: targetScore / count,
+      score,
       estimatedTimeSeconds: 90,
       discriminationPrediction: 0.3,
       chineseDimension: null,

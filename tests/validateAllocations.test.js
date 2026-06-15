@@ -59,6 +59,27 @@ describe("validateAllocations", () => {
     expect(rows.map((row) => row.actualScore)).toEqual([25, 25, 50]);
   });
 
+  it("建議配分可為小數但實際帶入配分一律為整數", () => {
+    const equalObjectives = [
+      { ...objectives[0], objectiveId: "A", periodCount: 1 },
+      { ...objectives[1], objectiveId: "B", periodCount: 1 },
+      { ...objectives[2], objectiveId: "C", periodCount: 1 },
+    ];
+    const suggestedRows = calculateSuggestedObjectiveScores({
+      objectives: equalObjectives,
+      totalScore: 100,
+    });
+    const actualRows = buildDefaultObjectiveAllocations({
+      objectives: equalObjectives,
+      totalScore: 100,
+    });
+
+    expect(suggestedRows[0].suggestedScore).toBeCloseTo(33.3333333333);
+    expect(actualRows.map((row) => row.actualScore)).toEqual([34, 33, 33]);
+    expect(actualRows.every((row) => Number.isInteger(row.actualScore))).toBe(true);
+    expect(actualRows.reduce((sum, row) => sum + row.actualScore, 0)).toBe(100);
+  });
+
   it("實際配分合計 100 且可整除題數時通過", () => {
     const result = validateAllocations({
       objectives,
@@ -117,6 +138,20 @@ describe("validateAllocations", () => {
     expect(result.errors).toContain(
       "1-1-1 共 20 分，規劃 4 題時每題 5 分，超過每題最多 3 分。",
     );
+  });
+
+  it("非整數實際配分會被防呆擋下", () => {
+    const result = validateAllocations({
+      objectives,
+      allocations: [
+        { objectiveId: "1-1-1", actualScore: 16.5 },
+        { objectiveId: "1-1-2", actualScore: 33.5 },
+        { objectiveId: "2-1-1", actualScore: 50 },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain("1-1-1 的實際配分需為正整數。");
   });
 
   it("偏離建議超過門檻時只列為 warning 不阻擋", () => {

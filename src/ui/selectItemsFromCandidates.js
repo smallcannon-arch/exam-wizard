@@ -2,6 +2,7 @@ import {
   DEFAULT_MAX_PER_ITEM_SCORE,
   legalQuestionCounts,
 } from "./validateAllocations.js";
+import { distributeIntegerScores } from "./distributeIntegerScores.js";
 
 function toNumber(value) {
   const number = Number(value);
@@ -156,20 +157,16 @@ export function computeSelectionScores({
 export function computeGroupSubScores({ objectiveScore, subItemCount } = {}) {
   const score = toPositiveInteger(objectiveScore);
   const count = toPositiveInteger(subItemCount);
+  const scores =
+    score !== null && count !== null ? distributeIntegerScores(score, count) : [];
 
-  if (score === null || count === null || count > score) {
+  if (score === null || count === null || scores.length === 0) {
     return {
       ok: false,
       scores: [],
       errors: ["題組小題配分需能分成正整數。"],
     };
   }
-
-  const baseScore = Math.floor(score / count);
-  const remainder = score % count;
-  const scores = Array.from({ length: count }, (_, index) =>
-    baseScore + (index < remainder ? 1 : 0),
-  );
 
   return {
     ok: scores.every((value) => value > 0),

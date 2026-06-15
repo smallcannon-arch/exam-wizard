@@ -1,4 +1,5 @@
 import { DEFAULT_MAX_PER_ITEM_SCORE, legalQuestionCounts } from "./validateAllocations.js";
+import { distributeIntegerScores } from "./distributeIntegerScores.js";
 
 const QUESTION_TYPES = ["選擇題", "填充題", "應用題", "勾選題", "畫圖題", "其他"];
 
@@ -39,11 +40,43 @@ function buildObjectiveScoreMap(objectiveAllocations = []) {
   );
 }
 
-function intersectLegalCounts(objectiveIds, scoreByObjectiveId, maxPerItemScore) {
-  const legalSets = objectiveIds
-    .map((objectiveId) =>
+function getSectionObjectiveKey(sectionIndex, objectiveId) {
+  return `${sectionIndex}::${objectiveId}`;
+}
+
+function buildSectionObjectiveScoreMap(sectionDrafts, scoreByObjectiveId) {
+  const referencesByObjectiveId = new Map();
+
+  sectionDrafts.forEach((draft, sectionIndex) => {
+    draft.sectionObjectiveIds.forEach((objectiveId) => {
+      const references = referencesByObjectiveId.get(objectiveId) ?? [];
+      references.push(sectionIndex);
+      referencesByObjectiveId.set(objectiveId, references);
+    });
+  });
+
+  const sectionObjectiveScores = new Map();
+
+  referencesByObjectiveId.forEach((sectionIndexes, objectiveId) => {
+    const totalScore = scoreByObjectiveId.get(objectiveId);
+    const distributedScores = distributeIntegerScores(totalScore, sectionIndexes.length);
+
+    sectionIndexes.forEach((sectionIndex, scoreIndex) => {
+      sectionObjectiveScores.set(
+        getSectionObjectiveKey(sectionIndex, objectiveId),
+        distributedScores[scoreIndex] ?? totalScore / sectionIndexes.length,
+      );
+    });
+  });
+
+  return sectionObjectiveScores;
+}
+
+function intersectLegalCountsForScores(scores, maxPerItemScore) {
+  const legalSets = scores
+    .map((score) =>
       legalQuestionCounts({
-        objectiveScore: scoreByObjectiveId.get(String(objectiveId)),
+        objectiveScore: score,
         maxPerItem: maxPerItemScore,
       }),
     )
@@ -127,8 +160,8 @@ export function convertPlanSectionsToStateSections({
     ),
   );
   const scoreByObjectiveId = buildObjectiveScoreMap(objectiveAllocations);
-
-  return (Array.isArray(planSections) ? planSections : []).map((section, index) => {
+  const sectionDrafts = (Array.isArray(planSections) ? planSections : []).map(
+    (section) => {
     const kind = section?.kind === "group" ? "group" : "normal";
     const groupPlan = section?.groupPlan && typeof section.groupPlan === "object"
       ? section.groupPlan
@@ -152,9 +185,29 @@ export function convertPlanSectionsToStateSections({
       kind === "group"
         ? groupSubCount
         : toPositiveInteger(section?.plannedCount, 1);
+
+    return {
+      source: section,
+      kind,
+      groupPlan,
+      sectionObjectiveIds,
+      groupSubCount,
+      rawPlannedCount,
+    };
+  });
+  const sectionObjectiveScores = buildSectionObjectiveScoreMap(
+    sectionDrafts,
+    scoreByObjectiveId,
+  );
+
+  return sectionDrafts.map((draft, index) => {
+    const { source: section, kind, groupPlan, sectionObjectiveIds, groupSubCount, rawPlannedCount } = draft;
+    const sectionScores = sectionObjectiveIds.map((objectiveId) =>
+      sectionObjectiveScores.get(getSectionObjectiveKey(index, objectiveId)),
+    );
     const legalCounts =
       kind === "normal"
-        ? intersectLegalCounts(sectionObjectiveIds, scoreByObjectiveId, maxPerItemScore)
+        ? intersectLegalCountsForScores(sectionScores, maxPerItemScore)
         : [];
     const plannedCount =
       kind === "group"
